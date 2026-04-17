@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-17（V7.3 实测修复）
-> 版本：V7.3（V7.2 + 云服务器镜像调试修复9个BUG）
+> 最后更新：2026-04-18（V7.4 实测修复）
+> 版本：V7.4（V7.3 + AI云服务器镜像调试修复6个BUG：f-string转义/前后端字段名/细纲上下文/正文生成传参/字数归一化）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -182,6 +182,18 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 | 31 | `dramatica_flow_web_ui.html` | 无法查看角色成长档案 | 前端无查看按钮，结果临时插入DOM | 添加"查看成长档案"按钮 + loadCharacterGrowth函数，step3每次渲染自动加载 |
 | 32 | `dramatica_flow_web_ui.html` | 无法查看世界观内容（角色/地点/事件） | 前端无查看入口，世界观数据隐藏在JSON编辑器中 | 添加"查看世界观"按钮 + loadWorldView函数 + 可折叠面板 |
 
+### V7.4 修复（AI云服务器镜像调试 2026-04-18）
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 33 | `core/server/routers/ai_actions.py` | 大纲生成500: Invalid format specifier | f-string里的JSON示例 `{"sequences": [...]}` 花括号未转义 | 3处 `{"key": ...}` → `{{"key": ...}}`，Python表达式保持 `{expr}` |
+| 34 | `core/server/routers/ai_actions.py` | 章节大纲500: Invalid format specifier | 同上，`emotional_arc: {"start":...}` 未转义 | `{{"start":...}}` |
+| 35 | `core/server/routers/ai_actions.py` | 章纲/详细大纲字数写3000-5000 | prompt没传target_words，LLM自由发挥；fallback默认4000 | 读config的target_words_per_chapter传入prompt；fallback改为2000 |
+| 36 | `core/server/deps.py` | 生成细纲/正文422 Unprocessable Entity | 前端发`chapter_number`/`extra_points`/`style_override`，后端要`chapter`/`context`/`style` | Pydantic加`Field(alias=...)` + `populate_by_name=True` |
+| 37 | `core/server/routers/ai_actions.py` | 细纲生成修仙题材，和章纲无关 | prompt只传了题材，没传故事大纲/章纲/世界观 | prompt加入outline.json + chapter_outlines.json + world.json + characters.json上下文 |
+| 38 | `core/server/routers/ai_actions.py` | 正文生成500或乱写 | WriterAgent.write_chapter需要6个位置参数，旧代码只传了3个且类型错误 | 完整重写：构造scene_summaries/blueprint/protagonist/world_context，正确传参 |
+| 39 | `core/server/routers/ai_actions.py` | 细纲场景字数等分不合理 | LLM不遵守word_budget，后端等分2000/n | 改为LLM输出weight(1-10)，后端按权重比例归一化分配字数 |
+
 ---
 
 ## 五、已验证可工作的流程
@@ -198,8 +210,11 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 ✅ 角色成长规划（逐角色调用，5角色约2-3分钟，结果持久化到character_growth.json）
 ✅ 前端世界观查看（可折叠面板显示角色/地点/事件）
 ✅ 前端角色成长查看（可折叠面板，自动加载已保存数据）
-⏳ 大纲生成（已修复前端res.data问题，待端到端测试）
-⏳ 写作流程（未测试）
+✅ 故事大纲生成（POST /api/books/{id}/ai-generate/outline → 200）
+✅ 章节大纲生成（POST /api/books/{id}/ai-generate/chapter-outlines → 200）
+✅ 详细大纲/细纲生成（POST /api/books/{id}/ai-generate/detailed-outline → 200，字数按权重分配）
+✅ 章节正文生成（POST /api/books/{id}/ai-generate/chapter-content → 200，WriterAgent正确传参）
+⏳ 写作全流程端到端测试（细纲→正文→审计→修订循环）
 ⏳ 情绪曲线（已修复前端res.data问题，待端到端测试）
 
 ---
@@ -208,9 +223,11 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 
 | 优先级 | 问题 | 说明 |
 |--------|------|------|
-| P1 | 端到端测试 | 完整跑通：世界观→角色成长→情绪曲线→大纲→写作→审计→导出 |
+| P1 | 正文生成端到端测试 | 细纲→正文→审计→修订完整跑通，验证WriterAgent产出质量 |
+| P1 | f-string转义漏网排查 | ai_actions.py之外的其他router文件可能存在同类问题（enhanced.py/outline.py等） |
 | P2 | 前端其他功能对齐 | Token消耗面板、Checkpoint恢复、KB热加载等V6/V7新功能的Web UI验证 |
 | P2 | 大纲续写返回new_total_chapters | 后端未返回该字段，前端toast显示不完整 |
+| P2 | 细纲字数权重范围调优 | 当前weight 1-10差异过大，可考虑缩小到1-5或限制比例 |
 
 ---
 
@@ -315,6 +332,24 @@ LLM 输出的字段名/类型/嵌套结构不可能 100% 匹配预定义的 Pyda
 
 ### 坑29：Web UI 动态内容刷新即丢失 ⭐V7.3新增
 前端用 `panel.prepend(div)` 插入的动态内容（如角色成长结果），在面板重新渲染时会丢失。**解决方案**：后端持久化到文件 + 前端每次渲染时自动从 API 加载已保存数据。
+
+### 坑30：f-string 里 JSON 花括号必须转义 ⭐V7.4新增
+Python 的 `f"""..."""` 字符串中，`{` 和 `}` 是格式化占位符。如果 prompt 里包含 JSON 示例如 `{"key": "value"}`，必须写成 `{{"key": "value"}}`。**常见触发场景**：给 LLM 的 prompt 中包含返回格式示例。**规则**：f-string 里的字面量花括号一律双写 `{{` `}}`，Python 表达式保持单写 `{expr}`。
+
+### 坑31：Pydantic alias 兼容前后端字段名 ⭐V7.4新增
+前端和后端字段名不一致时（如前端 `chapter_number` vs 后端 `chapter`），422 Unprocessable Entity。**解决方案**：Pydantic v2 用 `Field(alias="前端字段名")` + `model_config = {"populate_by_name": True}`，两种命名都能识别。
+
+### 坑32：LLM prompt 必须包含足够上下文 ⭐V7.4新增
+生成细纲时 prompt 只给了题材和风格，没给故事大纲/章纲/世界观，LLM 无上下文就按默认套路（修仙）编。**规则**：所有生成类 prompt 必须传入相关上下文文件（outline.json / chapter_outlines.json / world.json / characters.json）。
+
+### 坑33：Web UI 调 Agent 必须正确传参 ⭐V7.4新增
+Web UI 的 `ai_generate_chapter_content` 直接调 `WriterAgent.write_chapter()`，但传参全错（位置参数类型错误、缺少必填参数）。CLI 走的 `pipeline.py` 正常，因为 pipeline 正确构造了所有参数。**教训**：Web UI 和 CLI 共用 Agent 时，Web UI 端必须按 Agent 方法签名完整传参，不能偷懒。
+
+### 坑34：LLM 不遵守 prompt 中的数值约束 ⭐V7.4新增
+prompt 中写 `word_budget: 667`，LLM 经常输出 900。**解决方案**：不要依赖 LLM 严格遵守数值，改为让 LLM 输出权重（weight），后端代码做归一化计算。
+
+### 坑35：config 字段名必须和 read_config() 返回的 key 一致 ⭐V7.4新增
+`BookConfig` 数据类定义 `target_words_per_chapter`，`read_config()` 返回 dict 的 key 也是这个。如果 fallback 默认值和实际 config 值不一致（如默认 4000 但 config 是 2000），会导致字数异常。**建议**：所有 fallback 默认值应与 BookConfig 定义一致。
 
 ---
 
