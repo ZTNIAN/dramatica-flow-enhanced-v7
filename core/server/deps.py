@@ -269,14 +269,16 @@ class ImportChapterOutlinesReq(BaseModel):
     merge: bool = False
 
 class DetailedOutlineReq(BaseModel):
-    chapter: int
-    context: str = ""
+    model_config = {"populate_by_name": True}
+    chapter: int = Field(alias="chapter_number")
+    context: str = Field(default="", alias="extra_points")
     style: str = "standard"
 
 class ChapterContentReq(BaseModel):
-    chapter: int
+    model_config = {"populate_by_name": True}
+    chapter: int = Field(alias="chapter_number")
     outline: dict | None = None
-    style: str = "standard"
+    style: str = Field(default="standard", alias="style_override")
     previous_summary: str = ""
 
 class ExtractStoryStateReq(BaseModel):
