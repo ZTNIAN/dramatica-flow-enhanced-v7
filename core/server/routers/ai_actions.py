@@ -392,41 +392,214 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
     except Exception:
         genre, target_words, style_guide, forbidden = "玄幻", 2000, "", []
 
-    # 读取章纲
-    outline_text = ""
-    if req.outline:
-        outline_text = json.dumps(req.outline, ensure_ascii=False)
-    else:
+    # ── 1. 构造 scene_summaries（从章纲或详细大纲） ──
+    scene_summaries = ""
+    chapter_title = ""
+
+    # 优先用详细大纲
+    do_path = s.state_dir / "detailed_outlines" / f"ch{req.chapter:04d}.json"
+    if do_path.exists():
+        try:
+            do = json.loads(do_path.read_text(encoding="utf-8"))
+            chapter_title = do.get("title", "")
+            scenes = do.get("scenes", [])
+            parts = []
+            for sc in scenes:
+                beats = sc.get("beats", [])
+                for b in beats:
+                    if isinstance(b, str):
+                        parts.append(f"- {b}")
+                    elif isinstance(b, dict):
+                        parts.append(f"- {b.get('description', str(b))}")
+            scene_summaries = "\n".join(parts) if parts else do.get("detailed_summary", "")
+        except Exception:
+            pass
+
+    # 回退到章纲
+    if not scene_summaries:
         co_path = s.state_dir / "chapter_outlines.json"
         if co_path.exists():
-            outlines = json.loads(co_path.read_text(encoding="utf-8"))
-            for co in outlines:
-                if co.get("chapter_number") == req.chapter:
-                    outline_text = json.dumps(co, ensure_ascii=False)
-                    break
+            try:
+                all_cos = json.loads(co_path.read_text(encoding="utf-8"))
+                for co in all_cos:
+                    if co.get("chapter_number") == req.chapter:
+                        chapter_title = co.get("title", "")
+                        beats = co.get("beats", [])
+                        parts = []
+                        for b in beats:
+                            if isinstance(b, dict):
+                                parts.append(f"- {b.get('description', str(b))}")
+                            else:
+                                parts.append(f"- {str(b)}")
+                        scene_summaries = "\n".join(parts) if parts else co.get("summary", "")
+                        break
+            except Exception:
+                pass
 
-    # 读取前文摘要
-    prev_summary = req.previous_summary
-    if not prev_summary:
+    # 最终兜底
+    if not scene_summaries:
+        scene_summaries = f"第{req.chapter}章，请根据故事大纲推进剧情。"
+
+    # ── 2. 构造 world_context（世界观+角色） ──
+    world_ctx_parts = []
+    for fname in ("world.json", "characters.json"):
+        fp = s.state_dir / fname
+        if fp.exists():
+            try:
+                world_ctx_parts.append(f"## {fname}\n{fp.read_text(encoding='utf-8')[:2000]}")
+            except Exception:
+                pass
+    world_context = "\n\n".join(world_ctx_parts) if world_ctx_parts else "（世界观信息暂缺）"
+
+    # ── 3. 构造 protagonist（从 characters.json 提取主角） ──
+    from core.types.narrative import Character, CharacterNeed, CharacterWorldview, Obstacle
+    protagonist = None
+    char_path = s.state_dir / "characters.json"
+    if char_path.exists():
+        try:
+            chars_data = json.loads(char_path.read_text(encoding="utf-8"))
+            char_list = chars_data if isinstance(chars_data, list) else chars_data.get("characters", chars_data.get("main_characters", []))
+            if char_list:
+                c = char_list[0]
+                # 尝试找到主角
+                for ch in char_list:
+                    if ch.get("role") in ("protagonist", "主角", "main") or ch.get("id") == cfg.get("protagonist_id", ""):
+                        c = ch
+                        break
+                protagonist = Character(
+                    id=c.get("id", "protagonist"),
+                    name=c.get("name", "主角"),
+                    need=CharacterNeed(
+                        external=c.get("need", {}).get("external", c.get("external_goal", "生存")),
+                        internal=c.get("need", {}).get("internal", c.get("internal_goal", "找到自我"))
+                    ),
+                    obstacles=[],
+                    worldview=CharacterWorldview(
+                        belief=c.get("worldview", {}).get("belief", ""),
+                        flaw=c.get("worldview", {}).get("flaw", "")
+                    ),
+                    arc=c.get("arc", "positive"),
+                    profile=c.get("profile", c.get("background", "")),
+                    behavior_lock=c.get("behavior_lock", []),
+                    role=c.get("role", "protagonist"),
+                    current_goal=c.get("current_goal", ""),
+                    hidden_agenda=c.get("hidden_agenda", "")
+                )
+        except Exception:
+            pass
+    if protagonist is None:
+        protagonist = Character(
+            id="protagonist", name="主角",
+            need=CharacterNeed(external="生存", internal="找到自我"),
+            obstacles=[], worldview=CharacterWorldview(belief="", flaw=""),
+            arc="positive", profile="", behavior_lock=[]
+        )
+
+    # ── 4. 构造 ArchitectBlueprint ──
+    from core.agents.architect import ArchitectBlueprint, PreWriteChecklist
+    # 从章纲提取信息
+    hooks_to_plant = []
+    chapter_end_hook = ""
+    core_conflict = ""
+    emotional_journey = {"start": "平静", "end": "紧张"}
+
+    # 从详细大纲提取
+    if do_path.exists():
+        try:
+            do = json.loads(do_path.read_text(encoding="utf-8"))
+            hooks_to_plant = do.get("hooks_to_plant", [])
+            chapter_end_hook = do.get("chapter_end_hook", "")
+            ea = do.get("emotional_arc", {})
+            if ea:
+                emotional_journey = {"start": ea.get("start", "平静"), "end": ea.get("end", "紧张")}
+        except Exception:
+            pass
+
+    # 从章纲提取
+    co_path2 = s.state_dir / "chapter_outlines.json"
+    if co_path2.exists():
+        try:
+            all_cos2 = json.loads(co_path2.read_text(encoding="utf-8"))
+            for co in all_cos2:
+                if co.get("chapter_number") == req.chapter:
+                    ea = co.get("emotional_arc", {})
+                    if ea and not emotional_journey.get("start"):
+                        emotional_journey = {"start": ea.get("start", "平静"), "end": ea.get("end", "紧张")}
+                    break
+        except Exception:
+            pass
+
+    blueprint = ArchitectBlueprint(
+        core_conflict=core_conflict or "推进剧情",
+        hooks_to_advance=[],
+        hooks_to_plant=hooks_to_plant,
+        emotional_journey=emotional_journey,
+        chapter_end_hook=chapter_end_hook,
+        pace_notes="",
+        pre_write_checklist=PreWriteChecklist(
+            active_characters=[protagonist.name],
+            required_locations=[],
+            resources_in_play=[],
+            hooks_status=[],
+            risk_scan=""
+        )
+    )
+
+    # ── 5. 读取前文摘要 ──
+    prior_summaries = req.previous_summary
+    if not prior_summaries:
         summary_path = s.state_dir / "chapter_summaries.md"
         if summary_path.exists():
-            prev_summary = summary_path.read_text(encoding="utf-8")[-2000:]
+            prior_summaries = summary_path.read_text(encoding="utf-8")[-3000:]
 
+    # ── 6. 读取伏笔/因果链/情感弧线 ──
+    pending_hooks = ""
+    hooks_path = s.state_dir / "hooks.json"
+    if hooks_path.exists():
+        try:
+            hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+            open_hooks = [h for h in hooks if not h.get("resolved")]
+            pending_hooks = "\n".join(f"- {h.get('description','')}" for h in open_hooks[:10])
+        except Exception:
+            pass
+
+    causal_chain = ""
+    cc_path = s.state_dir / "causal_chain.json"
+    if cc_path.exists():
+        try:
+            cc = json.loads(cc_path.read_text(encoding="utf-8"))
+            causal_chain = json.dumps(cc[-5:], ensure_ascii=False) if isinstance(cc, list) else str(cc)
+        except Exception:
+            pass
+
+    emotional_arcs = ""
+    ea_path = s.state_dir / "emotional_arcs.json"
+    if ea_path.exists():
+        try:
+            emotional_arcs = ea_path.read_text(encoding="utf-8")[-1000:]
+        except Exception:
+            pass
+
+    # ── 7. 调用 WriterAgent ──
     from core.agents import WriterAgent
     llm = create_llm()
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
     try:
-        from core.narrative import ChapterOutlineSchema
-        chapter_outline = None
-        if req.outline:
-            try:
-                chapter_outline = ChapterOutlineSchema.model_validate(req.outline)
-            except Exception:
-                pass
-        result = await run_sync(writer.write_chapter, chapter_outline, None,
-                                target_words=target_words, forbidden_words=forbidden,
-                                previous_summary=prev_summary)
+        result = await run_sync(
+            writer.write_chapter,
+            scene_summaries,       # str
+            blueprint,             # ArchitectBlueprint
+            protagonist,           # Character
+            world_context,         # str
+            req.chapter,           # int
+            target_words,          # int
+            prior_summaries=prior_summaries,
+            chapter_title=chapter_title,
+            pending_hooks=pending_hooks,
+            causal_chain=causal_chain,
+            emotional_arcs=emotional_arcs,
+        )
         s.save_draft(req.chapter, result.content)
         return {"ok": True, "content": result.content, "chars": len(result.content),
                 "settlement": dc_to_dict(result.settlement) if result.settlement else None}
