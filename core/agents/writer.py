@@ -247,8 +247,9 @@ class WriterAgent:
 ### 高风险连续性点（写时注意）
 {blueprint.pre_write_checklist.risk_scan}
 
-### 字数要求
+### 字数要求（必须严格遵守）
 目标 {target_words} 字（允许 ±10%，即 {int(target_words*0.9)}–{int(target_words*1.1)} 字）
+⚠️ 绝对不能超过 {int(target_words*1.2)} 字。写到目标字数就收尾，不要展开额外情节。
 
 ---
 请直接开始写正文，写完后输出：
