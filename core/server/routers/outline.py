@@ -16,7 +16,7 @@ from ..deps import (
 router = APIRouter(prefix="/api/books", tags=["outline"])
 
 
-@router.get("/{{book_id}}/outline")
+@router.get("/{book_id}/outline")
 def get_outline(book_id: str):
     s = sm(book_id)
     outline_path = s.state_dir / "outline.json"
@@ -25,7 +25,7 @@ def get_outline(book_id: str):
     return json.loads(outline_path.read_text(encoding="utf-8"))
 
 
-@router.get("/{{book_id}}/chapter-outlines")
+@router.get("/{book_id}/chapter-outlines")
 def get_chapter_outlines(book_id: str):
     s = sm(book_id)
     path = s.state_dir / "chapter_outlines.json"
@@ -34,7 +34,7 @@ def get_chapter_outlines(book_id: str):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-@router.put("/{{book_id}}/outline")
+@router.put("/{book_id}/outline")
 def save_outline(book_id: str, req: SaveOutlineReq):
     s = sm(book_id)
     outline_path = s.state_dir / "outline.json"
@@ -42,7 +42,7 @@ def save_outline(book_id: str, req: SaveOutlineReq):
     return {"ok": True, "message": "大纲已保存"}
 
 
-@router.put("/{{book_id}}/chapter-outlines")
+@router.put("/{book_id}/chapter-outlines")
 def save_chapter_outlines(book_id: str, req: SaveChapterOutlinesReq):
     s = sm(book_id)
     path = s.state_dir / "chapter_outlines.json"
@@ -50,7 +50,7 @@ def save_chapter_outlines(book_id: str, req: SaveChapterOutlinesReq):
     return {"ok": True, "message": f"已保存 {len(req.outlines)} 章章纲"}
 
 
-@router.post("/{{book_id}}/import/outline")
+@router.post("/{book_id}/import/outline")
 def import_outline(book_id: str, req: ImportOutlineReq):
     s = sm(book_id)
     raw = req.outline
@@ -83,7 +83,7 @@ def import_outline(book_id: str, req: ImportOutlineReq):
             "sequences": seq_count, "total_chapters": total_ch}
 
 
-@router.post("/{{book_id}}/import/chapter-outlines")
+@router.post("/{book_id}/import/chapter-outlines")
 def import_chapter_outlines(book_id: str, req: ImportChapterOutlinesReq):
     s = sm(book_id)
     if not req.outlines or not isinstance(req.outlines, list):
