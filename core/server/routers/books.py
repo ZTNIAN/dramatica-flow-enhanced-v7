@@ -57,8 +57,6 @@ def create_book(req: CreateBookReq):
     config = BookConfig(
         id=book_id, title=req.title, genre=req.genre,
         target_words_per_chapter=req.words, target_chapters=req.chapters,
-        protagonist_id="", status="planning",
-        created_at=datetime.now(timezone.utc).isoformat(),
         custom_forbidden_words=[w.strip() for w in req.forbidden.split(",") if w.strip()],
         style_guide=req.style_guide,
     )
