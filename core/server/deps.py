@@ -109,7 +109,7 @@ def load_env():
     load_dotenv(ENV_PATH, override=True)
 
 
-def create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 16384):
+def create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 8192):
     """创建 LLM 实例"""
     from core.llm import LLMConfig, create_provider
     provider = os.environ.get("LLM_PROVIDER", "deepseek").lower()
