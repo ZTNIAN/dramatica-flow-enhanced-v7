@@ -300,7 +300,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
             seqs = outline_data.get("sequences", [])
-            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:800]}"
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:2000]}"
         except Exception:
             pass
 
@@ -311,7 +311,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             all_cos = json.loads(co_path.read_text(encoding="utf-8"))
             for co in all_cos:
                 if co.get("chapter_number") == req.chapter:
-                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:600]}"
+                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:1500]}"
                     break
         except Exception:
             pass
@@ -322,7 +322,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         wp = s.state_dir / wf
         if wp.exists():
             try:
-                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:600]}"
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
             except Exception:
                 pass
 
@@ -349,18 +349,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        _raw = resp.content.strip()
-        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE).replace("```", "").strip()
-        _raw = _re.sub(r",\s*}", "}", _raw)
-        _raw = _re.sub(r",\s*]", "]", _raw)
-        try:
-            data = _json.loads(_raw)
-        except _json.JSONDecodeError:
-            m = _re.search(r"\{.*\}", _raw, _re.DOTALL)
-            if m:
-                data = _json.loads(m.group())
-            else:
-                raise
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         data["chapter"] = req.chapter
 
         # ── 场景字数归一化：按 weight 比例分配 target_words ──
@@ -620,7 +609,6 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent ──
     from core.agents import WriterAgent
-    # 按目标字数限制 max_tokens，防止LLM超写
     chapter_max_tokens = min(8192, max(2048, int(target_words * 1.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
@@ -641,20 +629,14 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             emotional_arcs=emotional_arcs,
         )
         content = result.content
-        # 后处理：如果超过目标字数120%，在最近的段落结尾截断
+        # 后处理：超过目标120%则截断
         max_chars = int(target_words * 1.2)
         if len(content) > max_chars:
-            # 找 max_chars 之后的第一个段落结尾（
-
-）
-            cut_pos = content.rfind('
-
-', int(target_words * 0.8), max_chars + 200)
+            cut_pos = content.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
             if cut_pos > int(target_words * 0.8):
                 content = content[:cut_pos]
             else:
-                # 没找到段落结尾，按句号截
-                cut_pos = content.rfind('。', int(target_words * 0.8), max_chars + 100)
+                cut_pos = content.rfind("。", int(target_words * 0.8), max_chars + 100)
                 if cut_pos > int(target_words * 0.8):
                     content = content[:cut_pos+1]
                 else:
