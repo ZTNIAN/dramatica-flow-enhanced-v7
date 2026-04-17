@@ -715,13 +715,41 @@ async function loadStep3(forceSelect) {
             <div><div style="font-size:13px;font-weight:500">导入 JSON</div><div style="font-size:11px;color:var(--text3)">粘贴或上传由外部大模型提取的 JSON 世界观数据（<a href="/templates/novel_extract_prompt.md" target="_blank" style="color:var(--blue)">查看提取模板</a>）</div></div>
           </div>
         </div>
-        <div style="display:flex;gap:8px;justify-content:center;margin-top:20px">
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:20px;flex-wrap:wrap">
           <button class="btn btn-primary btn-lg" onclick="unlockStep(4);goStep(4)">进入大纲 &#8250;</button>
+          <button class="btn btn-lg" onclick="toggleSection('world-view')" style="border-color:var(--green);color:var(--green)">&#127758; 查看世界观</button>
           <button class="btn btn-lg" onclick="runCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128101; 角色成长规划</button>
-          <button class="btn btn-lg" onclick="loadCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128065; 查看成长档案</button>
+          <button class="btn btn-lg" onclick="toggleSection('char-growth-result')" style="border-color:var(--purple);color:var(--purple)">&#128065; 查看成长档案</button>
+          <button class="btn btn-lg" onclick="toggleSection('edit-options')" style="border-color:var(--blue);color:var(--blue)">&#9998; 修改世界观</button>
         </div>
+        <div id="edit-options" style="display:none;margin-top:16px">
+          <div style="text-align:left;max-width:500px;margin:0 auto;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid var(--green);cursor:pointer" onclick="editExistingSetup('form')">
+              <div style="font-size:20px">&#128221;</div>
+              <div><div style="font-size:13px;font-weight:500">表单编辑</div><div style="font-size:11px;color:var(--text3)">在可视化表单中修改角色、地点、事件</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid var(--purple);cursor:pointer" onclick="editExistingSetup('json')">
+              <div style="font-size:20px">&#128196;</div>
+              <div><div style="font-size:13px;font-weight:500">JSON 编辑</div><div style="font-size:11px;color:var(--text3)">直接编辑原始 JSON 数据</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid var(--blue);cursor:pointer" onclick="editExistingSetup('ai')">
+              <div style="font-size:20px">&#129302;</div>
+              <div><div style="font-size:13px;font-weight:500">AI 重新生成</div><div style="font-size:11px;color:var(--text3)">描述新想法，让 AI 重新生成（当前数据仅作参考）</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid #e67e22;cursor:pointer" onclick="loadStep3Extract()">
+              <div style="font-size:20px">&#128214;</div>
+              <div><div style="font-size:13px;font-weight:500">从小说提取</div><div style="font-size:11px;color:var(--text3)">上传或粘贴现有小说文本，AI 自动提取角色和世界设定</div></div>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid #f39c12;cursor:pointer" onclick="showImportJsonModal()">
+              <div style="font-size:20px">&#128229;</div>
+              <div><div style="font-size:13px;font-weight:500">导入 JSON</div><div style="font-size:11px;color:var(--text3)">粘贴或上传由外部大模型提取的 JSON 世界观数据（<a href="/templates/novel_extract_prompt.md" target="_blank" style="color:var(--blue)">查看提取模板</a>）</div></div>
+            </div>
+          </div>
+        </div>
+        <div id="world-view" style="display:none;margin-top:16px"></div>
       </div>`;
-    // 自动加载已保存的角色成长档案
+    // 自动加载世界观内容和角色成长档案
+    loadWorldView().catch(() => {});
     loadCharacterGrowth().catch(() => {});
     return;
   }
@@ -3732,6 +3760,72 @@ async function runCharacterGrowth() {
       toast('生成失败', false);
     }
   } catch (e) { toast('请求失败: ' + e.message, false); }
+}
+
+// ── V7.2: 折叠面板 + 世界观查看 ──────────────────────────────────────────
+
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function loadWorldView() {
+  if (!currentBook) return;
+  const panel = document.getElementById('world-view');
+  if (!panel) return;
+  try {
+    const [charsRes, worldRes, eventsRes] = await Promise.all([
+      api(`/books/${currentBook.id}/setup/characters`).catch(() => null),
+      api(`/books/${currentBook.id}/setup/world`).catch(() => null),
+      api(`/books/${currentBook.id}/setup/events`).catch(() => null),
+    ]);
+    let charsData = {}, worldData = {}, eventsData = {};
+    try { charsData = JSON.parse(charsRes?.content || '{}'); } catch {}
+    try { worldData = JSON.parse(worldRes?.content || '{}'); } catch {}
+    try { eventsData = JSON.parse(eventsRes?.content || '{}'); } catch {}
+    const chars = charsData.characters || [];
+    const locs = worldData.locations || [];
+    const events = eventsData.events || [];
+    let html = '<div class="card" style="border-color:var(--green)">';
+    html += '<div class="card-header" style="color:var(--green)">&#127758; 世界观总览</div>';
+    // 角色
+    if (chars.length) {
+      html += `<div style="margin-bottom:16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">&#128100; 角色 (${chars.length})</div>`;
+      chars.forEach(c => {
+        html += `<div style="padding:8px;margin-bottom:6px;background:var(--bg-dark);border-radius:6px;font-size:12px">
+          <b>${esc(c.name)}</b> <span style="color:var(--text3)">[${esc(c.role||'')}]</span>
+          <div style="color:var(--text2);margin-top:4px">${esc(c.personality||'')}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    // 地点
+    if (locs.length) {
+      html += `<div style="margin-bottom:16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">&#127961; 地点 (${locs.length})</div>`;
+      locs.forEach(l => {
+        html += `<div style="padding:8px;margin-bottom:6px;background:var(--bg-dark);border-radius:6px;font-size:12px">
+          <b>${esc(l.name)}</b>
+          <div style="color:var(--text2);margin-top:4px">${esc((l.description||'').slice(0,100))}${(l.description||'').length>100?'...':''}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    // 事件
+    if (events.length) {
+      html += `<div style="margin-bottom:16px"><div style="font-size:13px;font-weight:600;margin-bottom:8px">&#9889; 事件 (${events.length})</div>`;
+      events.forEach(e => {
+        html += `<div style="padding:8px;margin-bottom:6px;background:var(--bg-dark);border-radius:6px;font-size:12px">
+          <span style="color:var(--text3)">${esc(e.chapter_hint||'')}</span>
+          <div style="color:var(--text2);margin-top:4px">${esc((e.description||'').slice(0,120))}${(e.description||'').length>120?'...':''}</div>
+        </div>`;
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+  } catch (e) { panel.innerHTML = '<div style="color:var(--red)">加载世界观失败</div>'; }
 }
 
 // ── V7.2: 查看已保存的角色成长档案 ──────────────────────────────────────
