@@ -343,27 +343,38 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 - 拆分为 2-4 个场景，每个场景包含地点、人物、冲突、情节节拍
 - 规划伏笔植入点和章末钩子
 - 情绪弧线要与章纲一致
-- word_budget 是硬约束：所有场景的 word_budget 之和必须等于 {target_words}，系统会自动修正，请按比例分配
+- 每个场景用 weight（1-10）标注情节权重：过渡/铺垫=2-3，冲突推进=5-6，高潮/转折=8-10，收束=3-4。系统会按权重比例自动计算 word_budget
 
-返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "word_budget": {target_words//3}, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
+返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "weight": 5, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
         data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         data["chapter"] = req.chapter
 
-        # ── 场景字数归一化：按 target_words 重新分配，保证节奏精确 ──
+        # ── 场景字数归一化：按 weight 比例分配 target_words ──
         scenes = data.get("scenes", [])
         if scenes:
-            n = len(scenes)
-            base = target_words // n
-            remainder = target_words % n
+            # 提取权重，默认 5
+            weights = [max(1, min(10, sc.get("weight", 5))) for sc in scenes]
+            total_weight = sum(weights)
+            if total_weight == 0:
+                total_weight = len(scenes)
+                weights = [1] * len(scenes)
+
+            # 按比例分配，至少 100 字/场景
+            allocated = []
+            remaining = target_words
+            for i, w in enumerate(weights[:-1]):
+                words = max(100, round(target_words * w / total_weight))
+                allocated.append(words)
+                remaining -= words
+            allocated.append(max(100, remaining))  # 余数给最后一个
+
+            # 写回 word_budget，删掉 weight
             for i, sc in enumerate(scenes):
-                sc["word_budget"] = base + (1 if i < remainder else 0)
-            # 写回总计校验
-            total_check = sum(sc["word_budget"] for sc in scenes)
-            if total_check != target_words and scenes:
-                scenes[-1]["word_budget"] += target_words - total_check
+                sc["word_budget"] = allocated[i]
+                sc.pop("weight", None)
 
         out_dir = s.state_dir / "detailed_outlines"
         out_dir.mkdir(exist_ok=True)
