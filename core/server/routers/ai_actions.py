@@ -620,8 +620,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent ──
     from core.agents import WriterAgent
-    # 按目标字数限制 max_tokens，防止LLM超写（1中文≈1.5token，加系统prompt余量）
-    chapter_max_tokens = min(8192, max(2048, int(target_words * 2)))
+    # 按目标字数限制 max_tokens，防止LLM超写
+    chapter_max_tokens = min(8192, max(2048, int(target_words * 1.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
@@ -640,8 +640,27 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             causal_chain=causal_chain,
             emotional_arcs=emotional_arcs,
         )
-        s.save_draft(req.chapter, result.content)
-        return {"ok": True, "content": result.content, "chars": len(result.content),
+        content = result.content
+        # 后处理：如果超过目标字数120%，在最近的段落结尾截断
+        max_chars = int(target_words * 1.2)
+        if len(content) > max_chars:
+            # 找 max_chars 之后的第一个段落结尾（
+
+）
+            cut_pos = content.rfind('
+
+', int(target_words * 0.8), max_chars + 200)
+            if cut_pos > int(target_words * 0.8):
+                content = content[:cut_pos]
+            else:
+                # 没找到段落结尾，按句号截
+                cut_pos = content.rfind('。', int(target_words * 0.8), max_chars + 100)
+                if cut_pos > int(target_words * 0.8):
+                    content = content[:cut_pos+1]
+                else:
+                    content = content[:max_chars]
+        s.save_draft(req.chapter, content)
+        return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(result.settlement) if result.settlement else None}
     except Exception as e:
         raise HTTPException(500, f"生成章节内容失败：{e}")
