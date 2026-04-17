@@ -189,7 +189,7 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 - estimated_scenes: 预估场景数（整数）
 - key_events: 关键事件列表
 
-返回 JSON：{"sequences": [...]}"""
+返回 JSON：{{"sequences": [...]}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
@@ -219,7 +219,7 @@ async def ai_continue_outline(book_id: str, req: AiContinueOutlineReq):
     prompt = f"""续写故事大纲。已有 {len(existing_seqs)} 个序列，最后序列：{last_summary}
 请追加 {req.extra_sequences} 个新序列。
 {f'想法：{req.idea}' if req.idea else ''}
-返回 JSON：{"sequences": [...]}"""
+返回 JSON：{{"sequences": [...]}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
@@ -290,7 +290,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 {f'上下文：{req.context}' if req.context else ''}
 风格：{req.style}
 
-返回 JSON：{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {...}, "target_words": 4000}"""
+返回 JSON：{{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {{...}}, "target_words": 4000}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
