@@ -2325,6 +2325,40 @@ function selectWritingChapter(idx) {
     el.style.borderLeft = i === idx ? '3px solid var(--blue)' : '';
     el.style.background = i === idx ? 'var(--bg2)' : '';
   });
+  // 自动加载已有细纲
+  loadExistingDetailedOutline(chNum);
+}
+
+async function loadExistingDetailedOutline(chNum) {
+  const area = document.getElementById('detail-outline-area');
+  if (!area) return;
+  try {
+    const d = await api(`/books/${currentBook.id}/detailed-outline/${chNum}`);
+    if (!d || !d.scenes) return;
+    window._currentDetailedOutline = d;
+    area.innerHTML = `
+      <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:12px;font-weight:600">细纲：${esc(d.title || '')}</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="editDetailedOutline()">编辑</button>
+            <button class="btn btn-sm" onclick="document.getElementById('detail-outline-content').style.display=document.getElementById('detail-outline-content').style.display==='none'?'block':'none'">收起/展开</button>
+          </div>
+        </div>
+        <div id="detail-outline-content">
+          <div style="font-size:11px;margin-bottom:8px">${esc(d.detailed_summary || '')}</div>
+          ${d.scenes?.length ? `<div style="font-size:11px;margin-bottom:6px"><b>场景拆分 (${d.scenes.length})：</b></div>
+            ${d.scenes.map((s, si) => `<div style="background:var(--bg);border-radius:6px;padding:8px;margin-bottom:6px">
+              <div style="font-size:11px;font-weight:600">${esc(s.scene_title || '场景'+(si+1))} <span style="color:var(--text3);font-weight:normal">[${esc(s.location||'')}] ${esc(s.word_budget||'')+'字'}</span></div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">目标：${esc(s.goal||'')}</div>
+              <div style="font-size:11px;color:var(--text3)">冲突：${esc(s.conflict||'')}</div>
+              ${s.beats?.length ? `<div style="font-size:10px;color:var(--purple);margin-top:2px">节拍：${s.beats.map(b=>esc(b)).join(' → ')}</div>` : ''}
+            </div>`).join('')}` : ''}
+          ${d.hooks_to_plant?.length ? `<div style="font-size:10px;color:var(--yellow);margin-top:4px">埋伏笔：${d.hooks_to_plant.map(h=>esc(h)).join('、')}</div>` : ''}
+          ${d.chapter_end_hook ? `<div style="font-size:10px;color:var(--green);margin-top:2px">结尾钩子：${esc(d.chapter_end_hook)}</div>` : ''}
+        </div>
+      </div>`;
+  } catch (e) { /* 无已有细纲，正常 */ }
 }
 
 async function saveChapterOutline(idx) {
