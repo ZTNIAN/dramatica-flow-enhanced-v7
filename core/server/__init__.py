@@ -143,3 +143,7 @@ app.include_router(analysis.router)
 app.include_router(enhanced.router)
 app.include_router(settings.router)
 app.include_router(export.router)
+
+# V7: 注册旧版兼容路由（独立注册，避免双重前缀）
+from .routers.writing import register_legacy_routes
+register_legacy_routes(app)
