@@ -663,9 +663,15 @@ class TrackedProvider(LLMProvider):
 
     @staticmethod
     def _detect_model(provider: LLMProvider) -> str:
-        """尝试从 provider 配置中获取模型名"""
+        """尝试从 provider 配置中获取模型名（穿透 FallbackProvider）"""
         if hasattr(provider, "config") and hasattr(provider.config, "model"):
             return provider.config.model
+        # 穿透 FallbackProvider，取第一个 provider 的模型名
+        if hasattr(provider, "providers") and provider.providers:
+            inner_name, inner_provider = provider.providers[0]
+            if hasattr(inner_provider, "config") and hasattr(inner_provider.config, "model"):
+                return inner_provider.config.model
+            return inner_name
         return "unknown"
 
     def set_context(self, agent_name: str, chapter: int = 0):
