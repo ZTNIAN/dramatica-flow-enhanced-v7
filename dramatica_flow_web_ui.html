@@ -2466,7 +2466,7 @@ async function doWrite(count) {
     try { await api(`/books/${currentBook.id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ style_guide: styleVal }) }); } catch(e) {}
   }
   try {
-    const res = await api(`/action/write?book_id=${encodeURIComponent(currentBook.id)}&count=${count}`, {
+    const res = await api(`/books/${currentBook.id}/write?count=${count}`, {
       method: 'POST',
     });
     if (res.ok) { toast('写作完成', true); await loadBookData(); loadStep5(); }
@@ -3557,7 +3557,7 @@ async function reloadKB() {
   try {
     const res = await api('/books/reload-kb', { method: 'POST' });
     if (res.ok) {
-      toast(`知识库已重新加载（${res.files_loaded || '?'} 个文件）`, true);
+      toast(`知识库已重新加载（${res.changed_count || 0} 个文件）`, true);
       loadKBStatus();
     } else {
       toast('加载失败', false);
