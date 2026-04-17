@@ -12,8 +12,8 @@ from ..llm import LLMProvider, LLMMessage, parse_llm_json, with_retry
 from ..types.narrative import Character
 from ..narrative import ChapterOutlineSchema
 
-from .kb import KB_ANTI_AI, KB_BEFORE_AFTER, KB_WRITING_TECHNIQUES, KB_COMMON_MISTAKES, KB_FIVE_SENSES, KB_SHOW_DONT_TELL, KB_WRITER_SKILLS, KB_REVIEWER_CHECKLIST, KB_REVIEW_CRITERIA_95, KB_REDLINES, track_kb_query
 from .architect import SETTLEMENT_SEPARATOR
+from .kb import KB_ANTI_AI, KB_BEFORE_AFTER, KB_WRITING_TECHNIQUES, KB_COMMON_MISTAKES, KB_FIVE_SENSES, KB_SHOW_DONT_TELL, KB_WRITER_SKILLS, KB_REVIEWER_CHECKLIST, KB_REVIEW_CRITERIA_95, KB_REDLINES, track_kb_query
 
 _KB_ANTI_AI = KB_ANTI_AI
 _KB_BEFORE_AFTER = KB_BEFORE_AFTER
@@ -247,9 +247,9 @@ class WriterAgent:
 ### 高风险连续性点（写时注意）
 {blueprint.pre_write_checklist.risk_scan}
 
-### 字数要求（必须严格遵守）
+### 字数要求
 目标 {target_words} 字（允许 ±10%，即 {int(target_words*0.9)}–{int(target_words*1.1)} 字）
-⚠️ 绝对不能超过 {int(target_words*1.2)} 字。写到目标字数就收尾，不要展开额外情节。
+绝对不能超过 {int(target_words*1.2)} 字。写到目标字数就收尾，不要展开额外情节。
 
 ---
 请直接开始写正文，写完后输出：
