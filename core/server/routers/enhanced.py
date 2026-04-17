@@ -39,28 +39,50 @@ async def api_character_growth(book_id: str, req: CharacterGrowthReq | None = No
     if not characters:
         raise HTTPException(400, "请先设置角色")
 
+    # 读取世界观上下文
+    world_context = ""
+    world_path = setup_dir / "world.json"
+    if world_path.exists():
+        try:
+            world_data = json.loads(world_path.read_text(encoding="utf-8"))
+            world_context = json.dumps(world_data, ensure_ascii=False)
+        except Exception:
+            pass
+    # 如果没有 world.json，用角色信息兜底
+    if not world_context:
+        world_context = json.dumps(characters, ensure_ascii=False)
+
+    # 将角色列表转为 JSON 字符串
+    characters_json = json.dumps(characters, ensure_ascii=False)
+
     try:
         if req and req.character_id:
+            # 单角色模式：只规划指定角色
             chars = [c for c in characters if c.get("id") == req.character_id]
             if not chars:
                 raise HTTPException(404, f"角色 {req.character_id} 不存在")
-            result = await run_sync(expert.plan_character_growth, chars[0],
-                                     start_chapter=req.start_chapter,
-                                     end_chapter=req.end_chapter or 0)
+            single_char_json = json.dumps(chars, ensure_ascii=False)
+            result = await run_sync(expert.plan_character_growth, world_context, single_char_json)
         else:
-            # V7: 规划所有角色
-            all_results = []
-            for char in characters:
-                try:
-                    r = await run_sync(expert.plan_character_growth, char,
-                                        start_chapter=1, end_chapter=0)
-                    all_results.append(dc_to_dict(r))
-                except Exception as ce:
-                    all_results.append({"character": char.get("name", "?"), "error": str(ce)})
-            result = all_results[0] if len(all_results) == 1 else {"characters": all_results}
+            # V7: 规划所有角色（一次调用，Agent 内部遍历）
+            result = await run_sync(expert.plan_character_growth, world_context, characters_json)
         if isinstance(result, dict):
+            # 持久化到文件
+            try:
+                out_path = s.state_dir / "character_growth.json"
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
             return {"ok": True, "result": result}
-        return {"ok": True, "result": dc_to_dict(result)}
+        result_dict = dc_to_dict(result)
+        try:
+            out_path = s.state_dir / "character_growth.json"
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(result_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return {"ok": True, "result": result_dict}
     except HTTPException:
         raise
     except Exception as e:

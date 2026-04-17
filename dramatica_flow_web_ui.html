@@ -1060,7 +1060,7 @@ async function extractFromNovel() {
       btn.disabled = false; btn.textContent = 'AI 提取角色和世界设定';
       return;
     }
-    const data = res.data;
+    const data = res.extracted || res.data;
     window._aiResult = data;
     const chars = data.characters || [];
     const world = data.world || {};
@@ -1886,9 +1886,9 @@ async function aiGenOutline() {
     // 自动保存
     await api(`/books/${currentBook.id}/outline`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ outline: res.data }),
+      body: JSON.stringify({ outline: res.outline }),
     });
-    bookData.outline = res.data;
+    bookData.outline = res.outline;
     toast('大纲已生成并保存', true);
     loadStep4();
   } catch (e) { toast('生成失败: ' + e.message, false); }
@@ -1981,8 +1981,8 @@ async function aiContinueOutline() {
       body: JSON.stringify({ extra_sequences: parseInt(extra) || 2, idea }),
     });
     if (!res.ok) { toast(res.error || '续写失败', false); return; }
-    bookData.outline = res.data;
-    toast(`已追加 ${res.added} 个序列，共 ${res.new_total_chapters} 章`, true);
+    bookData.outline = res.outline;
+    toast(`已追加 ${res.added || ''} 个序列`, true);
     await loadBookData();
     loadStep4();
   } catch (e) { toast('续写失败: ' + e.message, false); }
@@ -2321,7 +2321,7 @@ async function genDetailedOutline(chNum) {
       body: JSON.stringify({ chapter_number: chNum, extra_points: extraPoints }),
     });
     if (!res.ok) { toast('细纲生成失败', false); area.innerHTML = ''; return; }
-    const d = res.data;
+    const d = res.outline;
     window._currentDetailedOutline = d;
     area.innerHTML = `
       <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
@@ -2581,7 +2581,7 @@ async function doExtractFromNovel() {
       body: JSON.stringify({ text: text.substring(0, 15000), genre }),
     });
     if (!res.ok) { toast(res.error || '提取失败', false); return; }
-    window._aiResult = res.data;
+    window._aiResult = res.extracted || res.data;
     toast('世界观提取成功', true);
     document.getElementById('modal-import')?.remove();
     step3Mode = 'form'; loadStep3Form(window._aiResult);
@@ -3700,8 +3700,8 @@ async function runCharacterGrowth() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
     });
-    if (res.ok && res.data) {
-      const profiles = res.data.profiles || [];
+    if (res.ok && res.result) {
+      const profiles = res.result.profiles || [];
       let html = '<div class="card" style="border-color:var(--purple)"><div class="card-header" style="color:var(--purple)">&#10003; 角色成长档案已生成</div>';
       profiles.forEach(p => {
         html += `<div style="margin-bottom:16px;padding:12px;background:var(--bg-dark);border-radius:6px">
@@ -3715,7 +3715,7 @@ async function runCharacterGrowth() {
           <div style="margin-top:6px;font-size:11px;color:var(--text3)">转折点：${(p.turning_points||[]).map(t => t.description).join(' → ')}</div>
         </div>`;
       });
-      html += `<div style="font-size:12px;color:var(--text2);margin-top:8px">${esc(res.data.overall_note||'')}</div></div>`;
+      html += `<div style="font-size:12px;color:var(--text2);margin-top:8px">${esc(res.result.overall_note||'')}</div></div>`;
       // 在世界观面板附近显示
       const panel = document.getElementById('step3-panel');
       const existing = document.getElementById('char-growth-result');
@@ -3786,8 +3786,8 @@ async function runEmotionCurve() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({}),
     });
-    if (res.ok && res.data) {
-      const d = res.data;
+    if (res.ok && res.result) {
+      const d = res.result;
       let html = `<div style="margin-bottom:12px"><b>整体趋势：</b>${esc(d.overall_trend)}</div>`;
       html += `<div style="margin-bottom:12px"><b>高潮章节：</b>第${(d.climax_chapters||[]).join('、')}章</div>`;
       // V7: Canvas 情绪曲线图
