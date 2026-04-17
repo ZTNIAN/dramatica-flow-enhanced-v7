@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-17
-> 版本：V7（V6 基础上 Web UI 对齐 CLI + 自检修复 12 个 BUG）
+> 最后更新：2026-04-17（V7.1修复）
+> 版本：V7.1（V7 + 部署实测修复4个BUG：state.py缺失/scene_architect缺失/kb-status 404/settings configured）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -51,6 +51,37 @@
 git clone https://github.com/ZTNIAN/dramatica-flow-enhanced-v7.git
 cd dramatica-flow-enhanced-v7
 ```
+
+---
+
+
+## V7.1 部署实测修复（2026-04-17）
+
+在 Windows-WSL 环境下首次部署 V7 时发现并修复了 4 个 BUG：
+
+### BUG 1：`core/types/state.py` 文件缺失 🔴严重
+- **现象**：`ModuleNotFoundError: No module named 'core.types.state'`
+- **原因**：V7 代码中 `core/types/__init__.py` 引用了 `state.py`，但该文件从未创建
+- **修复**：创建 `core/types/state.py`，包含 TruthFileKey、TRUTH_FILE_NAMES、WorldState、BookConfig、CausalLink、Hook 等全部类型定义
+- **涉及文件**：`core/types/state.py`（新建）
+
+### BUG 2：`core/agents/enhanced/scene_architect.py` 文件缺失 🔴严重
+- **现象**：`ModuleNotFoundError: No module named 'core.agents.enhanced.scene_architect'`
+- **原因**：`enhanced/__init__.py` 引用了 scene_architect，但该文件从未创建（style_checker.py 末尾有注释标题但无代码）
+- **修复**：创建 scene_architect.py，实现五维场景审核（空间感/五感/氛围/转场/情节融合）
+- **涉及文件**：`core/agents/enhanced/scene_architect.py`（新建）
+
+### BUG 3：`/api/books/kb-status` 返回 404 🟡中等
+- **现象**：知识库管理页面 "状态加载失败: Failed to fetch"
+- **原因**：`books.py` 和 `enhanced.py` 都用 prefix `/api/books`，books 的 `/{book_id}` 泛匹配把 `/kb-status` 吃掉了
+- **修复**：在 `server/__init__.py` 中将 `enhanced.router` 移到 `books.router` 前面注册
+- **涉及文件**：`core/server/__init__.py`
+
+### BUG 4：Web UI 每次要求输入 API Key 🟡中等
+- **现象**：.env 已配置 API Key，但 Web UI 仍显示配置页面
+- **原因**：后端 `/api/settings/status` 返回 `has_api_key`/`ready` 字段，但前端检查的是 `configured` 字段
+- **修复**：在 settings router 响应中添加 `"configured": has_key`
+- **涉及文件**：`core/server/routers/settings.py`
 
 ---
 
