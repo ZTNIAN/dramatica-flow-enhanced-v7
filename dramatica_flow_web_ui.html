@@ -2103,16 +2103,14 @@ async function aiContinueChOutlines() {
   try {
     const res = await api(`/books/${currentBook.id}/continue-writing`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ extra_chapters: parseInt(extra) || 10 }),
+      body: JSON.stringify({ count: parseInt(extra) || 10 }),
     });
     if (!res.ok) { toast(res.detail || '续写失败', false); return; }
-    chapterOutlinesCache = res.outlines;
-    bookData.chapterOutlines = res.outlines;
+    const results = res.results || [];
+    const written = results.filter(r => r.ok).length;
+    const errors = results.filter(r => r.error);
     await loadBookData();
-    const modeTip = res.mode === 'outline_driven'
-      ? `（基于 ${res.uncovered_sequences} 个新序列联动续写）`
-      : '（自由续写）';
-    toast(`已追加 ${res.added} 章大纲，共 ${res.new_total} 章 ${modeTip}`, true);
+    toast(`已完成 ${written} 章写作${errors.length ? '，' + errors.length + ' 章失败' : ''}`, errors.length ? false : true);
     loadStep4();
   } catch (e) { toast('续写失败: ' + e.message, false); }
 }
@@ -2486,16 +2484,14 @@ async function continueWriting() {
   try {
     const res = await api(`/books/${currentBook.id}/continue-writing`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ extra_chapters: parseInt(extraCount) || 10 }),
+      body: JSON.stringify({ count: parseInt(extraCount) || 10 }),
     });
     if (!res.ok) { toast(res.detail || '续写失败', false); return; }
-    chapterOutlinesCache = res.outlines;
-    bookData.chapterOutlines = res.outlines;
+    const results = res.results || [];
+    const written = results.filter(r => r.ok).length;
+    const errors = results.filter(r => r.error);
     await loadBookData();
-    const modeTip = res.mode === 'outline_driven'
-      ? `（基于 ${res.uncovered_sequences} 个新序列联动续写）`
-      : '（自由续写）';
-    toast(`已追加 ${res.added} 章大纲，共 ${res.new_total} 章 ${modeTip}`, true);
+    toast(`已完成 ${written} 章写作${errors.length ? '，' + errors.length + ' 章失败' : ''}`, errors.length ? false : true);
     loadStep5();
   } catch (e) { toast('续写失败: ' + e.message, false); }
 }
@@ -3420,28 +3416,20 @@ async function loadTokenUsage() {
   panel.innerHTML = '<div class="loading">加载中...</div>';
   try {
     const data = await api(`/books/${currentBook.id}/token-usage`);
-    const chapters = data.chapters || [];
-    if (!chapters.length) {
+    const usage = data.usage || [];
+    const total = data.total || {};
+    if (!usage.length) {
       panel.innerHTML = '<div class="empty">暂无 Token 消耗数据，写作后自动记录</div>';
       return;
     }
-    // 汇总
-    const totalTokens = chapters.reduce((s, c) => s + (c.total_tokens || 0), 0);
-    const totalCost = chapters.reduce((s, c) => s + (c.estimated_cost_usd || 0), 0);
-    const totalInput = chapters.reduce((s, c) => s + (c.input_tokens || 0), 0);
-    const totalOutput = chapters.reduce((s, c) => s + (c.output_tokens || 0), 0);
-    // 收集所有Agent
-    const allAgents = new Set();
-    chapters.forEach(c => { Object.keys(c.agents || {}).forEach(a => allAgents.add(a)); });
-    const agentList = [...allAgents];
-    // Agent总消耗
-    const agentTotals = {};
-    agentList.forEach(a => {
-      agentTotals[a] = chapters.reduce((s, c) => s + ((c.agents || {})[a]?.tokens || 0), 0);
-    });
-    // 找最大值用于柱状图缩放
-    const maxChTokens = Math.max(...chapters.map(c => c.total_tokens || 0), 1);
-    const maxAgentTokens = Math.max(...Object.values(agentTotals), 1);
+    const totalTokens = total.total_tokens || 0;
+    const totalCost = total.cost_usd || 0;
+    const totalInput = total.total_input_tokens || 0;
+    const totalOutput = total.total_output_tokens || 0;
+    const agentTotals = total.by_agent || {};
+    const agentList = Object.keys(agentTotals);
+    const maxChTokens = Math.max(...usage.map(c => c.total_tokens || 0), 1);
+    const maxAgentTokens = Math.max(...Object.values(agentTotals).map(v => typeof v === 'number' ? v : 0), 1);
 
     let html = `
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">
@@ -3453,10 +3441,10 @@ async function loadTokenUsage() {
     // 每章Token柱状图
     html += `<div class="card"><div class="card-header">&#128200; 各章Token消耗（柱状图）</div>
       <div style="display:flex;gap:3px;align-items:flex-end;height:130px;padding:8px 0;overflow-x:auto;min-width:0">
-        ${chapters.map(c => {
+        ${usage.map(c => {
           const h = Math.max(4, ((c.total_tokens || 0) / maxChTokens) * 110);
-          const costColor = (c.estimated_cost_usd || 0) > 0.05 ? 'var(--red)' : (c.estimated_cost_usd || 0) > 0.01 ? 'var(--yellow)' : 'var(--green)';
-          return `<div style="flex:1;min-width:20px;display:flex;flex-direction:column;align-items:center;gap:2px" title="第${c.chapter}章: ${c.total_tokens||0} tokens ($${(c.estimated_cost_usd||0).toFixed(4)})">
+          const costColor = (c.cost_usd || 0) > 0.05 ? 'var(--red)' : (c.cost_usd || 0) > 0.01 ? 'var(--yellow)' : 'var(--green)';
+          return `<div style="flex:1;min-width:20px;display:flex;flex-direction:column;align-items:center;gap:2px" title="第${c.chapter}章: ${c.total_tokens||0} tokens ($${(c.cost_usd||0).toFixed(4)})">
             <div style="font-size:8px;color:${costColor};font-weight:600">${((c.total_tokens||0)/1000).toFixed(1)}K</div>
             <div style="width:100%;height:${h}px;background:${costColor};border-radius:3px;transition:height .3s;min-width:14px"></div>
             <div style="font-size:8px;color:var(--text3);white-space:nowrap">Ch${c.chapter}</div>
@@ -3469,9 +3457,10 @@ async function loadTokenUsage() {
       html += `<div class="card"><div class="card-header">&#128100; 各Agent Token消耗</div>
         <div style="display:flex;gap:6px;align-items:flex-end;height:120px;padding:8px 0;overflow-x:auto">
           ${agentList.map(a => {
-            const h = Math.max(4, (agentTotals[a] / maxAgentTokens) * 100);
-            return `<div style="flex:1;min-width:40px;display:flex;flex-direction:column;align-items:center;gap:2px" title="${a}: ${agentTotals[a]} tokens">
-              <div style="font-size:8px;color:var(--text2);font-weight:600">${(agentTotals[a]/1000).toFixed(1)}K</div>
+            const tokens = typeof agentTotals[a] === 'number' ? agentTotals[a] : 0;
+            const h = Math.max(4, (tokens / maxAgentTokens) * 100);
+            return `<div style="flex:1;min-width:40px;display:flex;flex-direction:column;align-items:center;gap:2px" title="${a}: ${tokens} tokens">
+              <div style="font-size:8px;color:var(--text2);font-weight:600">${(tokens/1000).toFixed(1)}K</div>
               <div style="width:100%;max-width:50px;height:${h}px;background:var(--blue);border-radius:3px"></div>
               <div style="font-size:7px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:50px">${esc(a)}</div>
             </div>`;
@@ -3479,7 +3468,7 @@ async function loadTokenUsage() {
         </div>
       </div>`;
     }
-    // 每章明细表格
+    // 每章明细表格（后端 by_agent: { agent: { input, output, calls } }）
     html += `<div class="card"><div class="card-header">&#128202; 逐章明细</div>
       <div style="max-height:400px;overflow-y:auto">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -3492,14 +3481,18 @@ async function loadTokenUsage() {
             <th style="padding:6px 8px;text-align:left">Agent明细</th>
           </tr></thead>
           <tbody>
-            ${chapters.map(c => {
-              const agentDetail = Object.entries(c.agents || {}).map(([a, v]) => `${a}:${(v.tokens||0).toLocaleString()}`).join(', ');
+            ${usage.map(c => {
+              const agents = c.by_agent || {};
+              const agentDetail = Object.entries(agents).map(([a, v]) => {
+                const tokens = typeof v === 'object' ? (v.input||0)+(v.output||0) : (v||0);
+                return `${a}:${tokens.toLocaleString()}`;
+              }).join(', ');
               return `<tr style="border-bottom:1px solid var(--border)">
                 <td style="padding:6px 8px;font-weight:600;color:var(--blue)">Ch.${c.chapter}</td>
-                <td style="padding:6px 8px;text-align:right;color:var(--text2)">${(c.input_tokens||0).toLocaleString()}</td>
-                <td style="padding:6px 8px;text-align:right;color:var(--text2)">${(c.output_tokens||0).toLocaleString()}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--text2)">${(c.total_input_tokens||0).toLocaleString()}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--text2)">${(c.total_output_tokens||0).toLocaleString()}</td>
                 <td style="padding:6px 8px;text-align:right;font-weight:600">${(c.total_tokens||0).toLocaleString()}</td>
-                <td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">$${(c.estimated_cost_usd||0).toFixed(4)}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--green);font-weight:600">$${(c.cost_usd||0).toFixed(4)}</td>
                 <td style="padding:6px 8px;color:var(--text3);font-size:11px">${esc(agentDetail)}</td>
               </tr>`;
             }).join('')}
