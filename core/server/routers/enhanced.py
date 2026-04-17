@@ -86,6 +86,20 @@ async def api_character_growth(book_id: str, req: CharacterGrowthReq | None = No
         raise HTTPException(500, f"角色成长规划失败：{e}")
 
 
+@router.get("/{book_id}/character-growth")
+def api_get_character_growth(book_id: str):
+    """获取已保存的角色成长档案"""
+    s = sm(book_id)
+    path = s.state_dir / "character_growth.json"
+    if not path.exists():
+        raise HTTPException(404, "角色成长档案不存在，请先生成")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"ok": True, "result": data}
+    except Exception:
+        raise HTTPException(500, "读取角色成长档案失败")
+
+
 @router.post("/{book_id}/dialogue-review")
 async def api_dialogue_review(book_id: str, req: DialogueReviewReq):
     """对话质量审查"""
