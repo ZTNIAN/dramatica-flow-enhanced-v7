@@ -449,11 +449,20 @@ async def action_write(book_id: str, count: int = Query(1)):
 
     def _write_sync():
         results = []
+        checkpoint_path = s.book_dir / "pipeline_checkpoint.json"
         for i in range(count):
             ch_num = next_ch + i
             if ch_num > len(all_outlines):
                 results.append({"chapter": ch_num, "status": "all_done"})
                 break
+            # V7: 写 checkpoint
+            try:
+                checkpoint_path.write_text(json.dumps({
+                    "status": "running", "total": count,
+                    "completed_count": i, "current_chapter": ch_num,
+                }, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
             co = all_outlines[ch_num - 1]
             try:
                 result = pipeline.run(co, False)
@@ -464,6 +473,23 @@ async def action_write(book_id: str, count: int = Query(1)):
                 })
             except Exception as e:
                 results.append({"chapter": ch_num, "error": str(e)})
+                # V7: 中断时保存 checkpoint
+                try:
+                    checkpoint_path.write_text(json.dumps({
+                        "status": "interrupted", "total": count,
+                        "completed_count": i, "failed_chapter": ch_num,
+                        "error": str(e),
+                    }, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
+                break
+        # 完成后清除 checkpoint
+        else:
+            try:
+                if checkpoint_path.exists():
+                    checkpoint_path.write_text(json.dumps({"status": "completed"}, ensure_ascii=False), encoding="utf-8")
+            except Exception:
+                pass
         return results
 
     loop = asyncio.get_event_loop()
@@ -558,28 +584,29 @@ async def resume_from_checkpoint(book_id: str):
     return await continue_writing(book_id, req)
 
 
-# ── V6: 旧路径兼容（前端可能仍调用 /api/action/*）─────────────────────────────
+# ── V7: 旧路径兼容（独立注册，避免 router prefix 双重嵌套）─────────────────────
 
-@router.post("/api/action/write")
-async def legacy_action_write(book_id: str = Query(...), count: int = Query(1)):
-    """旧路径兼容：/api/action/write → /{book_id}/write"""
-    logging.warning("[deprecated] /api/action/write 已弃用，请改用 /{book_id}/write")
-    return await action_write(book_id, count)
+def register_legacy_routes(app):
+    """注册旧版兼容路由（在 server/__init__.py 中调用）"""
 
+    @app.post("/api/action/write")
+    async def legacy_action_write(book_id: str = Query(...), count: int = Query(1)):
+        """旧路径兼容：/api/action/write → /{book_id}/write"""
+        logging.warning("[deprecated] /api/action/write 已弃用，请改用 /api/books/{book_id}/write")
+        return await action_write(book_id, count)
 
-@router.post("/api/action/audit")
-async def legacy_action_audit(book_id: str = Query(...), chapter: int = Query(...)):
-    """旧路径兼容：/api/action/audit → /{book_id}/audit"""
-    logging.warning("[deprecated] /api/action/audit 已弃用，请改用 /{book_id}/audit")
-    return await action_audit(book_id, chapter)
+    @app.post("/api/action/audit")
+    async def legacy_action_audit(book_id: str = Query(...), chapter: int = Query(...)):
+        """旧路径兼容：/api/action/audit → /{book_id}/audit"""
+        logging.warning("[deprecated] /api/action/audit 已弃用，请改用 /api/books/{book_id}/audit")
+        return await action_audit(book_id, chapter)
 
-
-@router.post("/api/action/revise")
-async def legacy_action_revise(
-    book_id: str = Query(...),
-    chapter: int = Query(...),
-    mode: str = Query("spot-fix"),
-):
-    """旧路径兼容：/api/action/revise → /{book_id}/revise"""
-    logging.warning("[deprecated] /api/action/revise 已弃用，请改用 /{book_id}/revise")
-    return await action_revise(book_id, chapter, mode)
+    @app.post("/api/action/revise")
+    async def legacy_action_revise(
+        book_id: str = Query(...),
+        chapter: int = Query(...),
+        mode: str = Query("spot-fix"),
+    ):
+        """旧路径兼容：/api/action/revise → /{book_id}/revise"""
+        logging.warning("[deprecated] /api/action/revise 已弃用，请改用 /api/books/{book_id}/revise")
+        return await action_revise(book_id, chapter, mode)
