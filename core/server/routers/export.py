@@ -42,7 +42,7 @@ def action_export(req: ExportRequest):
             outline_path = s.state_dir / "outline.json"
             if outline_path.exists():
                 outline = outline_path.read_text(encoding="utf-8")
-                content = f"# 大纲\n\n{{outline}}\n\n---\n\n{{content}}"
+                content = f"# 大纲\n\n{outline}\n\n---\n\n{content}"
         return {"content": content, "chapters": len(chapters), "chars": len(content)}
     elif req.format == "json":
         return {
