@@ -142,25 +142,28 @@ class CharacterGrowthExpert:
                 LLMMessage("system", "你是角色设计专家，只输出合法 JSON。"),
                 LLMMessage("user", prompt),
             ])
-            parsed = parse_llm_json(resp.content, _GrowthResultSchema, "plan_character_growth")
-            profiles = [
-                CharacterGrowthProfile(
-                    character_id=p.character_id,
-                    name=p.name,
-                    basic_setting=p.basic_setting,
-                    personality=p.personality,
-                    backstory=p.backstory,
-                    preferences=p.preferences,
-                    abilities=p.abilities,
-                    growth_trajectory=p.growth_trajectory,
-                    turning_points=p.turning_points,
-                    relationship_matrix=p.relationship_matrix,
-                )
-                for p in parsed.profiles
-            ]
+            # 直接 json.loads，不走 Pydantic 校验（避免 schema 不匹配）
+            import json as _json, re as _re
+            raw = resp.content
+            stripped = _re.sub(r"^\s*```(?:json)?\s*", "", raw.strip(), flags=_re.MULTILINE).replace("```", "").strip()
+            data = _json.loads(stripped)
+            profiles = []
+            for p in data.get("profiles", []):
+                profiles.append(CharacterGrowthProfile(
+                    character_id=p.get("character_id", ""),
+                    name=p.get("name", ""),
+                    basic_setting=p.get("basic_setting", {}),
+                    personality=p.get("personality", {}),
+                    backstory=p.get("backstory", {}),
+                    preferences=p.get("preferences", []),
+                    abilities=p.get("abilities", {}),
+                    growth_trajectory=p.get("growth_trajectory", {}),
+                    turning_points=p.get("turning_points", []),
+                    relationship_matrix=p.get("relationship_matrix", {}),
+                ))
             return CharacterGrowthResult(
                 profiles=profiles,
-                overall_note=parsed.overall_note,
+                overall_note=data.get("overall_note", ""),
             )
 
         return with_retry(_call)
