@@ -40,9 +40,9 @@ async def ai_generate_setup(book_id: str, req: AiGenerateSetupReq):
 风格：{req.style}
 返回纯 JSON，不要 markdown 代码块。"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         setup_dir = s.book_dir / "setup"
         setup_dir.mkdir(parents=True, exist_ok=True)
         if "characters" in data:
@@ -82,9 +82,9 @@ async def extract_from_novel(book_id: str, req: ExtractFromNovelReq):
 
 返回纯 JSON。"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         return {"ok": True, "extracted": data}
     except Exception as e:
         raise HTTPException(500, f"提取失败：{e}")
@@ -113,9 +113,9 @@ async def extract_story_state(book_id: str, req: ExtractStoryStateReq):
 
 返回纯 JSON。"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         return {"ok": True, "state": data}
     except Exception as e:
         raise HTTPException(500, f"提取故事状态失败：{e}")
@@ -146,9 +146,9 @@ async def extract_story_state_batch(book_id: str):
 
 文本：{ch_content[:5000]}
 返回 JSON。"""
-            resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-            from core.llm import parse_llm_json
-            state = parse_llm_json(resp.content)
+            resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+            import json as _json, re as _re
+            state = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
             state["chapter"] = i + 1
             all_states.append(state)
         except Exception as e:
@@ -191,9 +191,9 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 
 返回 JSON：{"sequences": [...]}"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         if "sequences" in data:
             from ..deps import normalize_outline
             data = normalize_outline(data, s)
@@ -221,9 +221,9 @@ async def ai_continue_outline(book_id: str, req: AiContinueOutlineReq):
 {f'想法：{req.idea}' if req.idea else ''}
 返回 JSON：{"sequences": [...]}"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        new_seqs = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        new_seqs = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         if "sequences" in new_seqs:
             existing["sequences"].extend(new_seqs["sequences"])
         else:
@@ -261,9 +261,9 @@ async def ai_generate_chapter_outlines(book_id: str):
 
 返回 JSON 数组。"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         outlines = data if isinstance(data, list) else data.get("outlines", data.get("chapters", []))
         co_path = s.state_dir / "chapter_outlines.json"
         co_path.write_text(json.dumps(outlines, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -292,9 +292,9 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 
 返回 JSON：{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {...}, "target_words": 4000}"""
     try:
-        resp = await run_sync(llm.chat, [LLMMessage(role="user", content=prompt)])
-        from core.llm import parse_llm_json
-        data = parse_llm_json(resp.content)
+        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        import json as _json, re as _re
+        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         data["chapter"] = req.chapter
         out_dir = s.state_dir / "detailed_outlines"
         out_dir.mkdir(exist_ok=True)
