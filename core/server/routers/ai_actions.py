@@ -245,6 +245,13 @@ async def ai_generate_chapter_outlines(book_id: str):
         raise HTTPException(404, "大纲不存在")
     outline = json.loads(outline_path.read_text(encoding="utf-8"))
 
+    # 读取每章字数配置
+    try:
+        cfg = s.read_config()
+        target_words_ch = cfg.get("target_words_per_chapter", 2000)
+    except Exception:
+        target_words_ch = 2000
+
     llm = create_llm()
     from core.llm import LLMMessage
     prompt = f"""根据以下故事大纲，生成详细的章纲。
@@ -257,7 +264,7 @@ async def ai_generate_chapter_outlines(book_id: str):
 - summary: 章节概述
 - beats: 情节节拍数组（每个含 id, description, dramatic_function）
 - emotional_arc: {{"start": "起始情绪", "end": "结束情绪"}}
-- target_words: 目标字数
+- target_words: 目标字数（统一使用 {target_words_ch}）
 
 返回 JSON 数组。"""
     try:
@@ -280,8 +287,10 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
     try:
         cfg = s.read_config()
         genre = cfg.get("genre", "玄幻")
+        target_words = cfg.get("target_words_per_chapter", 2000)
     except Exception:
         genre = "玄幻"
+        target_words = 2000
     llm = create_llm()
     from core.llm import LLMMessage
     prompt = f"""为第 {req.chapter} 章生成详细大纲。
@@ -289,8 +298,10 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 题材：{genre}
 {f'上下文：{req.context}' if req.context else ''}
 风格：{req.style}
+每章目标字数：{target_words}字
 
-返回 JSON：{{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {{...}}, "target_words": 4000}}"""
+
+返回 JSON：{{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {{...}}, "target_words": {target_words}}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
@@ -332,11 +343,11 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
     try:
         cfg = s.read_config()
         genre = cfg.get("genre", "玄幻")
-        target_words = cfg.get("target_words_per_chapter", 4000)
+        target_words = cfg.get("target_words_per_chapter", 2000)
         style_guide = cfg.get("style_guide", "")
         forbidden = cfg.get("custom_forbidden_words", [])
     except Exception:
-        genre, target_words, style_guide, forbidden = "玄幻", 4000, "", []
+        genre, target_words, style_guide, forbidden = "玄幻", 2000, "", []
 
     # 读取章纲
     outline_text = ""
