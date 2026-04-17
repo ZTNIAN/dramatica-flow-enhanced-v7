@@ -293,15 +293,58 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         target_words = 2000
     llm = create_llm()
     from core.llm import LLMMessage
-    prompt = f"""为第 {req.chapter} 章生成详细大纲。
+    # 读取故事大纲和本章章纲作为上下文
+    outline_ctx = ""
+    outline_path = s.state_dir / "outline.json"
+    if outline_path.exists():
+        try:
+            outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
+            seqs = outline_data.get("sequences", [])
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:2000]}"
+        except Exception:
+            pass
+
+    chapter_outline_ctx = ""
+    co_path = s.state_dir / "chapter_outlines.json"
+    if co_path.exists():
+        try:
+            all_cos = json.loads(co_path.read_text(encoding="utf-8"))
+            for co in all_cos:
+                if co.get("chapter_number") == req.chapter:
+                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:1500]}"
+                    break
+        except Exception:
+            pass
+
+    # 读取世界观
+    world_ctx = ""
+    for wf in ("world.json", "characters.json"):
+        wp = s.state_dir / wf
+        if wp.exists():
+            try:
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
+            except Exception:
+                pass
+
+    llm = create_llm()
+    from core.llm import LLMMessage
+    prompt = f"""为第 {req.chapter} 章生成详细大纲（细纲）。
 
 题材：{genre}
-{f'上下文：{req.context}' if req.context else ''}
 风格：{req.style}
 每章目标字数：{target_words}字
+{outline_ctx}
+{chapter_outline_ctx}
+{world_ctx}
+{f'用户补充要点：{req.context}' if req.context else ''}
 
+要求：
+- 必须严格遵循章纲的情节方向，不能偏离故事主线
+- 拆分为 2-4 个场景，每个场景包含地点、人物、冲突、情节节拍
+- 规划伏笔植入点和章末钩子
+- 情绪弧线要与章纲一致
 
-返回 JSON：{{"title": "...", "scenes": [...], "beats": [...], "emotional_arc": {{...}}, "target_words": {target_words}}}"""
+返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "word_budget": {target_words//3}, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
