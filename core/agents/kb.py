@@ -143,6 +143,7 @@ class _LazyKB:
     def __bool__(self): return bool(str(self))
     def __contains__(self, item): return item in str(self)
     def __iter__(self): return iter(str(self))
+    def __getitem__(self, key): return str(self)[key]
 
 
 # 模块级变量 — 使用懒加载代理
