@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-18（V7.4 实测修复）
-> 版本：V7.4（V7.3 + AI云服务器镜像调试修复6个BUG：f-string转义/前后端字段名/细纲上下文/正文生成传参/字数归一化）
+> 最后更新：2026-04-18（V7.5 云服务器调试 + 字数控制 + 细纲持久化）
+> 版本：V7.5（V7.4 + 云服务器镜像调试修复5个BUG + 正文字数控制 + 细纲自动加载 + 查看章纲按钮）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -573,6 +573,54 @@ dramatica-flow-enhanced-v7/
 | `CORS_ALLOW_ORIGINS` | localhost | CORS白名单 |
 | `LLM_FALLBACK_CHAIN` | deepseek | 降级链：deepseek,claude,openai |
 | `WS_ENABLED` | true | WebSocket进度推送 |
+
+---
+
+
+## 十五、V7.5 修复（云服务器镜像调试 2026-04-18）
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 40 | `core/server/routers/ai_actions.py` | 正文生成500: CharacterWorldview got unexpected keyword 'belief' | CharacterWorldview数据类字段是power/trust/coping，但代码传了belief/flaw | 改为使用正确字段：power="accepts", trust="selective", coping="fight"（2处：JSON提取 + fallback默认值） |
+| 41 | `core/agents/writer.py` | 正文生成500: SETTLEMENT_SEPARATOR is not defined | writer.py使用了architect.py中定义的常量但未导入 | 添加 `from .architect import SETTLEMENT_SEPARATOR` |
+| 42 | `core/agents/writer.py` | 正文生成500: _track_kb_query is not defined | import的是`track_kb_query`（无下划线），代码调用的是`_track_kb_query` | 统一改为`track_kb_query` |
+| 43 | `core/server/routers/ai_actions.py` | 正文超字数（目标2000字，实际输出4000-4600字） | LLM不遵守prompt字数约束；max_tokens=8192过大 | 双重控制：①max_tokens=target_words×1.5（上限8192，下限2048）②后处理：超过target×1.2按段落/句号截断 |
+| 44 | `core/server/routers/ai_actions.py` | 细纲生成JSON解析失败 | prompt上下文太长（大纲2000+章纲1500+世界观1500字符），DeepSeek输出异常 | 上下文截断：大纲2000→800，章纲1500→600，世界观1500→600 |
+
+### Web UI 改进
+
+| 改进 | 文件 | 说明 |
+|------|------|------|
+| 细纲自动加载 | `dramatica_flow_web_ui.html` | 选章节时自动从API加载已有细纲（GET /detailed-outline/{chapter}），刷新后不丢失 |
+| 细纲收起/展开 | `dramatica_flow_web_ui.html` | 细纲右上角添加「收起/展开」按钮，生成和加载时都有 |
+
+### 已验证可工作
+
+✅ 正文生成（2000字目标 → 实际2500字左右，可接受）
+⏳ 审计→修订完整管线（待测试）
+⏳ 管线模式（写下一章 → 巡查 → 审计 → 修订循环）
+
+### 踩坑记录（新增）
+
+#### 坑36：CharacterWorldview 字段名与代码调用不一致
+`CharacterWorldview` 定义了 `power/trust/coping`（Dramatica理论术语），但 `ai_actions.py` 中用 `belief/flaw`（通俗理解）。**教训**：构造数据类实例前，先检查类定义的字段名，不能凭直觉猜。
+
+#### 坑37：import 名和使用名不一致（下划线前缀）
+`from .kb import track_kb_query` 导入后，代码里写 `_track_kb_query()`。Python 不会报 NameError 在 import 阶段，只在实际调用时才报。**规则**：import 后立即在同文件确认使用名一致。
+
+#### 坑38：LLM 不遵守字数约束是常态，必须后处理
+prompt 写"2000字，不能超过2400字"，DeepSeek 输出 4000+。max_tokens 限制可以卡上限，但不够精确。**方案**：API层限制 token + 代码层后处理截断（按段落/句号边界），双重保险。
+
+#### 坑39：f-string 中截断字符串操作要小心转义
+在 Python 三引号字符串中写 `content.rfind('
+
+', ...)` 时，`
+` 会被解释为换行，导致代码结构崩溃。**方案**：用 `\n\n` 或在单独变量中定义分隔符。
+
+#### 坑40：上下文过长会导致 DeepSeek JSON 输出异常
+详细大纲 prompt 包含完整大纲+章纲+世界观+角色数据（合计约5000字符）时，DeepSeek 返回的 JSON 经常有语法错误。简化 prompt 或只传部分数据时正常。**方案**：对非关键上下文做截断（各600-800字符）。
 
 ---
 
