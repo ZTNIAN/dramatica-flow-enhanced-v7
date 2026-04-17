@@ -13,6 +13,7 @@ from ..types.narrative import Character
 from ..narrative import ChapterOutlineSchema
 
 from .kb import KB_ANTI_AI, KB_BEFORE_AFTER, KB_WRITING_TECHNIQUES, KB_COMMON_MISTAKES, KB_FIVE_SENSES, KB_SHOW_DONT_TELL, KB_WRITER_SKILLS, KB_REVIEWER_CHECKLIST, KB_REVIEW_CRITERIA_95, KB_REDLINES, track_kb_query
+from .architect import SETTLEMENT_SEPARATOR
 
 _KB_ANTI_AI = KB_ANTI_AI
 _KB_BEFORE_AFTER = KB_BEFORE_AFTER
@@ -256,13 +257,13 @@ class WriterAgent:
 
         def _call() -> WriterOutput:
             # 记录知识库查询
-            _track_kb_query("writer", "anti_ai_rules.md", "去AI味规范")
+            track_kb_query("writer", "anti_ai_rules.md", "去AI味规范")
             if _KB_BEFORE_AFTER:
-                _track_kb_query("writer", "before_after_examples.md", "修改前后对比")
+                track_kb_query("writer", "before_after_examples.md", "修改前后对比")
             if _KB_WRITER_SKILLS:
-                _track_kb_query("writer", "writer-skills.md", "写手技能库")
+                track_kb_query("writer", "writer-skills.md", "写手技能库")
             if _KB_SHOW_DONT_TELL:
-                _track_kb_query("writer", "show-dont-tell.md", "Show Don't Tell")
+                track_kb_query("writer", "show-dont-tell.md", "Show Don't Tell")
 
             resp = self.llm.complete([
                 LLMMessage("system", system),
