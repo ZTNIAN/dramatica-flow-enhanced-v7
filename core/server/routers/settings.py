@@ -47,6 +47,7 @@ def get_settings_status():
         "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"),
         "has_env_file": ENV_PATH.exists(),
         "ready": has_key,
+        "configured": has_key,
     }
 
 

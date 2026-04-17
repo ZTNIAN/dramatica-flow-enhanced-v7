@@ -132,6 +132,7 @@ from .routers import (
     settings, export,
 )
 
+app.include_router(enhanced.router)
 app.include_router(books.router)
 app.include_router(setup.router)
 app.include_router(chapters.router)
@@ -140,7 +141,6 @@ app.include_router(writing.router)
 app.include_router(ai_actions.router)
 app.include_router(threads.router)
 app.include_router(analysis.router)
-app.include_router(enhanced.router)
 app.include_router(settings.router)
 app.include_router(export.router)
 
