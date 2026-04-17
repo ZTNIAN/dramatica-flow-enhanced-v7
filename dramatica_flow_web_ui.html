@@ -721,6 +721,8 @@ async function loadStep3(forceSelect) {
           <button class="btn btn-lg" onclick="loadCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128065; 查看成长档案</button>
         </div>
       </div>`;
+    // 自动加载已保存的角色成长档案
+    loadCharacterGrowth().catch(() => {});
     return;
   }
   if (!status.has_templates || forceSelect) {
@@ -3736,13 +3738,11 @@ async function runCharacterGrowth() {
 
 async function loadCharacterGrowth() {
   if (!currentBook) { toast('请先选择书籍', false); return; }
-  toast('正在加载角色成长档案...', 'loading');
   try {
     const res = await api(`/books/${currentBook.id}/character-growth`);
-    if (!res.ok || !res.result) { toast('暂无角色成长档案，请先生成', false); return; }
+    if (!res.ok || !res.result) { return; }
     _renderCharacterGrowth(res.result);
-    toast('角色成长档案已加载', true);
-  } catch (e) { toast('加载失败: ' + e.message, false); }
+  } catch (e) { /* 404 表示还没生成，静默 */ }
 }
 
 function _renderCharacterGrowth(data) {
