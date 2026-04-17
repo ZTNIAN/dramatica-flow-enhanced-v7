@@ -48,8 +48,18 @@ async def api_character_growth(book_id: str, req: CharacterGrowthReq | None = No
                                      start_chapter=req.start_chapter,
                                      end_chapter=req.end_chapter or 0)
         else:
-            result = await run_sync(expert.plan_character_growth, characters[0],
-                                     start_chapter=1, end_chapter=0)
+            # V7: 规划所有角色
+            all_results = []
+            for char in characters:
+                try:
+                    r = await run_sync(expert.plan_character_growth, char,
+                                        start_chapter=1, end_chapter=0)
+                    all_results.append(dc_to_dict(r))
+                except Exception as ce:
+                    all_results.append({"character": char.get("name", "?"), "error": str(ce)})
+            result = all_results[0] if len(all_results) == 1 else {"characters": all_results}
+        if isinstance(result, dict):
+            return {"ok": True, "result": result}
         return {"ok": True, "result": dc_to_dict(result)}
     except HTTPException:
         raise
@@ -85,9 +95,16 @@ async def api_emotion_curve(book_id: str, req: EmotionCurveReq | None = None):
     designer = EmotionCurveDesigner(llm)
     try:
         cfg = s.read_config()
-        total = req.total_chapters if req and req.total_chapters else cfg.get("target_chapters", 90)
+        total = req.total_chapters if req and req.total_chapters else cfg.get("target_chapters", 0)
+        if not total:
+            outline_path = s.state_dir / "chapter_outlines.json"
+            if outline_path.exists():
+                outlines = json.loads(outline_path.read_text(encoding="utf-8"))
+                total = len(outlines) if outlines else 30
+            else:
+                total = 30
     except Exception:
-        total = 90
+        total = 30
     try:
         result = await run_sync(designer.design_emotion_curve, total)
         return {"ok": True, "result": dc_to_dict(result)}
