@@ -300,7 +300,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
             seqs = outline_data.get("sequences", [])
-            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:2000]}"
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:800]}"
         except Exception:
             pass
 
@@ -311,7 +311,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             all_cos = json.loads(co_path.read_text(encoding="utf-8"))
             for co in all_cos:
                 if co.get("chapter_number") == req.chapter:
-                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:1500]}"
+                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:600]}"
                     break
         except Exception:
             pass
@@ -322,7 +322,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         wp = s.state_dir / wf
         if wp.exists():
             try:
-                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:600]}"
             except Exception:
                 pass
 
@@ -349,7 +349,18 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
     try:
         resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE).replace("```", "").strip()
+        _raw = _re.sub(r",\s*}", "}", _raw)
+        _raw = _re.sub(r",\s*]", "]", _raw)
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            m = _re.search(r"\{.*\}", _raw, _re.DOTALL)
+            if m:
+                data = _json.loads(m.group())
+            else:
+                raise
         data["chapter"] = req.chapter
 
         # ── 场景字数归一化：按 weight 比例分配 target_words ──
@@ -501,8 +512,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     ),
                     obstacles=[],
                     worldview=CharacterWorldview(
-                        belief=c.get("worldview", {}).get("belief", ""),
-                        flaw=c.get("worldview", {}).get("flaw", "")
+                        power=c.get("worldview", {}).get("power", "accepts"),
+                        trust=c.get("worldview", {}).get("trust", "selective"),
+                        coping=c.get("worldview", {}).get("coping", "fight")
                     ),
                     arc=c.get("arc", "positive"),
                     profile=c.get("profile", c.get("background", "")),
@@ -517,7 +529,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         protagonist = Character(
             id="protagonist", name="主角",
             need=CharacterNeed(external="生存", internal="找到自我"),
-            obstacles=[], worldview=CharacterWorldview(belief="", flaw=""),
+            obstacles=[], worldview=CharacterWorldview(power="accepts", trust="selective", coping="fight"),
             arc="positive", profile="", behavior_lock=[]
         )
 
