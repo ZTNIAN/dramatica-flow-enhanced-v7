@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-17（V7.2 实测修复）
-> 版本：V7.2（V7.1 + Windows-WSL首次部署实测修复7个BUG）
+> 最后更新：2026-04-17（V7.3 实测修复）
+> 版本：V7.3（V7.2 + 云服务器镜像调试修复9个BUG）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -26,7 +26,7 @@
 14. **错误恢复** — 写作中断后可从checkpoint恢复（Web UI提示+按钮）
 15. **Web UI 全功能** — 浏览器端与CLI功能完全对齐
 
-**一句话：V7.1 是"Web UI全面对齐CLI + 自检修复12个BUG"，V7.2 是"首次实测部署修复7个阻断性BUG，系统可完整跑通世界观→大纲流程"。**
+**一句话：V7.1 是"Web UI全面对齐CLI + 自检修复12个BUG"，V7.2 是"首次实测部署修复7个阻断性BUG"，V7.3 是"云服务器镜像调试修复9个BUG，角色成长→世界观查看→大纲生成完整可用"。**
 
 ---
 
@@ -44,7 +44,8 @@
 | **V5** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v5 | 多LLM+选择性审查+WebSocket+Agent画像可视化 |
 | **V6** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v6 | 修复端点+自适应审查+闭环+追踪+热加载+恢复 |
 | **V7** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | Web UI对齐CLI + 自检修复12个BUG |
-| **V7.2（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 首次实测部署修复7个阻断性BUG |
+| **V7.2** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 首次实测部署修复7个阻断性BUG |
+| **V7.3（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 云服务器镜像调试修复9个BUG |
 
 ### 本地部署位置
 
@@ -154,6 +155,8 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 
 ## 四、已修复文件清单
 
+### V7.2 修复（首次实测）
+
 | 文件 | 改动 |
 |------|------|
 | `core/server/routers/books.py` | 删除 BookConfig 的 status 和 created_at 参数 |
@@ -164,6 +167,20 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 | `core/server/routers/setup.py` | {{book_id}} → {book_id}（5处） |
 | `core/server/routers/ai_actions.py` | llm.chat → llm.complete + parse_llm_json → json.loads |
 | `core/server/deps.py` | max_tokens 16384 → 8192 |
+
+### V7.3 修复（云服务器镜像调试）
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 24 | `core/server/routers/enhanced.py` | 角色成长"生成失败"500 | plan_character_growth期望(world_context, characters_json)，旧代码传(char_dict, start_chapter=...) | 读取world.json作上下文，传角色JSON字符串 |
+| 25 | `core/agents/kb.py` | 角色成长500: _LazyKB object is not subscriptable | _LazyKB类缺少__getitem__方法，所有KB[:N]切片操作都会崩溃 | 添加__getitem__方法委托到str(self)[key] |
+| 26 | `core/server/routers/enhanced.py` | 角色成长JSON解析失败 | 5角色×8维度一次生成超过DeepSeek 8192 max_tokens，响应截断 | 改为逐角色调用，每角色独立LLM请求 |
+| 27 | `core/agents/enhanced/character_growth.py` | 角色成长Schema校验失败 | Pydantic schema字段与LLM输出不完全匹配 | 去掉parse_llm_json，改用json.loads宽松解析 |
+| 28 | `dramatica_flow_web_ui.html` | 角色成长/情绪曲线/大纲等"生成失败" | 前端res.data但后端返回res.result/res.outline | 7处res.data改为res.result或res.outline，加fallback |
+| 29 | `dramatica_flow_web_ui.html` | 大纲续写引用不存在的res.new_total_chapters | 后端未返回该字段 | 删除该引用 |
+| 30 | `core/server/routers/enhanced.py` | 角色成长结果刷新后丢失 | 无GET端点，结果仅在POST响应中 | 添加GET /{book_id}/character-growth端点 |
+| 31 | `dramatica_flow_web_ui.html` | 无法查看角色成长档案 | 前端无查看按钮，结果临时插入DOM | 添加"查看成长档案"按钮 + loadCharacterGrowth函数，step3每次渲染自动加载 |
+| 32 | `dramatica_flow_web_ui.html` | 无法查看世界观内容（角色/地点/事件） | 前端无查看入口，世界观数据隐藏在JSON编辑器中 | 添加"查看世界观"按钮 + loadWorldView函数 + 可折叠面板 |
 
 ---
 
@@ -178,10 +195,12 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 ✅ 情感弧（GET /api/books/{id}/emotional-arcs → 200）
 ✅ setup/status（GET /api/books/{id}/setup/status → 200）
 ✅ AI 生成世界观（POST /api/books/{id}/ai-generate/setup → 200，生成3个JSON文件）
-⚠️ 前端世界观显示（数据已生成但前端需要手动保存才能看到）
-⏳ 大纲生成（未测试）
+✅ 角色成长规划（逐角色调用，5角色约2-3分钟，结果持久化到character_growth.json）
+✅ 前端世界观查看（可折叠面板显示角色/地点/事件）
+✅ 前端角色成长查看（可折叠面板，自动加载已保存数据）
+⏳ 大纲生成（已修复前端res.data问题，待端到端测试）
 ⏳ 写作流程（未测试）
-⏳ 角色成长规划（测试失败，原因待查）
+⏳ 情绪曲线（已修复前端res.data问题，待端到端测试）
 
 ---
 
@@ -189,10 +208,9 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 
 | 优先级 | 问题 | 说明 |
 |--------|------|------|
-| P1 | 前端世界观刷新 | AI生成后前端不自动刷新，需手动点JSON编辑器的保存 |
-| P1 | 角色成长规划报错 | 点击按钮后报"生成失败"，原因待查 |
 | P1 | 端到端测试 | 完整跑通：世界观→角色成长→情绪曲线→大纲→写作→审计→导出 |
 | P2 | 前端其他功能对齐 | Token消耗面板、Checkpoint恢复、KB热加载等V6/V7新功能的Web UI验证 |
+| P2 | 大纲续写返回new_total_chapters | 后端未返回该字段，前端toast显示不完整 |
 
 ---
 
@@ -279,6 +297,24 @@ DeepSeek API 的 `max_tokens` 有效范围是 `[1, 8192]`，超过会报 400 错
 
 ### 坑23：parse_llm_json 需要 Pydantic schema ⭐V7.2新增
 `parse_llm_json(raw, schema)` 的 `schema` 参数必须是 Pydantic 模型类（有 `model_validate` 方法）。如果只需要解析普通 JSON，用 `json.loads` 即可。
+
+### 坑24：API handler 和 Agent 方法参数签名必须对齐 ⭐V7.3新增
+`enhanced.py` 调用 `expert.plan_character_growth(char, start_chapter=1)` 但方法签名是 `(world_context: str, characters_json: str)`。**教训**：改了 Agent 方法签名后，必须同步检查所有调用方。
+
+### 坑25：_LazyKB 必须实现完整字符串协议 ⭐V7.3新增
+`_LazyKB` 懒加载代理实现了 `__str__`/`__len__`/`__bool__`/`__contains__`/`__iter__`，但漏了 `__getitem__`。代码中大量使用 `KB_XXX[:3000]` 切片操作，缺少 `__getitem__` 会直接崩溃。**必须补全**：`def __getitem__(self, key): return str(self)[key]`
+
+### 坑26：LLM 响应长度可能超过 max_tokens ⭐V7.3新增
+DeepSeek max_tokens 上限 8192。5个角色×8维度的详细 JSON 一次生成会超出限制，响应被截断导致 JSON 语法错误。**解决方案**：逐角色调用，或精简 prompt 控制输出长度。
+
+### 坑27：Pydantic schema 和 LLM 输出永远存在偏差 ⭐V7.3新增
+LLM 输出的字段名/类型/嵌套结构不可能 100% 匹配预定义的 Pydantic model。`parse_llm_json` 的 schema 校验会导致合法但格式稍有不同的响应被拒绝。**建议**：对非核心流程用 `json.loads` 宽松解析，只在需要强校验时才用 Pydantic。
+
+### 坑28：前端 res.data ≠ 后端返回字段名 ⭐V7.3新增
+后端各端点返回的 key 不统一（`result`/`outline`/`data`/`extracted`），但前端统一写的 `res.data`。**规则**：新增 API 端点时，后端返回 key 必须和前端 JS 对应，或前端加 fallback：`res.result || res.data`。
+
+### 坑29：Web UI 动态内容刷新即丢失 ⭐V7.3新增
+前端用 `panel.prepend(div)` 插入的动态内容（如角色成长结果），在面板重新渲染时会丢失。**解决方案**：后端持久化到文件 + 前端每次渲染时自动从 API 加载已保存数据。
 
 ---
 
