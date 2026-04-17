@@ -10,14 +10,14 @@ from ..deps import sm, dc_to_dict, CreateThreadReq, UpdateThreadReq
 router = APIRouter(prefix="/api/books", tags=["threads"])
 
 
-@router.get("/{{book_id}}/threads")
+@router.get("/{book_id}/threads")
 def get_threads(book_id: str):
     s = sm(book_id)
     ws = s.read_world_state()
     return dc_to_dict(ws.threads)
 
 
-@router.post("/{{book_id}}/threads")
+@router.post("/{book_id}/threads")
 def create_thread_api(book_id: str, req: CreateThreadReq):
     from core.types.narrative import NarrativeThread, ThreadType
     s = sm(book_id)
@@ -32,7 +32,7 @@ def create_thread_api(book_id: str, req: CreateThreadReq):
     return {"ok": True, "thread_id": req.id}
 
 
-@router.put("/{{book_id}}/threads/{{thread_id}}")
+@router.put("/{book_id}/threads/{thread_id}")
 def update_thread_api(book_id: str, thread_id: str, req: UpdateThreadReq):
     s = sm(book_id)
     kwargs = {k: v for k, v in req.model_dump().items() if v is not None}
@@ -42,7 +42,7 @@ def update_thread_api(book_id: str, thread_id: str, req: UpdateThreadReq):
     return {"ok": True}
 
 
-@router.delete("/{{book_id}}/threads/{{thread_id}}")
+@router.delete("/{book_id}/threads/{thread_id}")
 def delete_thread_api(book_id: str, thread_id: str):
     s = sm(book_id)
     s.delete_thread(thread_id)
@@ -50,7 +50,7 @@ def delete_thread_api(book_id: str, thread_id: str):
     return {"ok": True}
 
 
-@router.get("/{{book_id}}/threads/status")
+@router.get("/{book_id}/threads/status")
 def get_thread_status(book_id: str):
     s = sm(book_id)
     ws = s.read_world_state()
@@ -64,7 +64,7 @@ def get_thread_status(book_id: str):
     }
 
 
-@router.get("/{{book_id}}/timeline")
+@router.get("/{book_id}/timeline")
 def get_timeline(book_id: str, thread_id: str | None = None, character_id: str | None = None,
                  from_chapter: int | None = None, to_chapter: int | None = None):
     s = sm(book_id)
