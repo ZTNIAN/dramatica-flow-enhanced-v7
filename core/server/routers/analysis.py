@@ -11,14 +11,14 @@ from ..deps import sm, dc_to_dict
 router = APIRouter(prefix="/api/books", tags=["analysis"])
 
 
-@router.get("/{{book_id}}/causal-chain")
+@router.get("/{book_id}/causal-chain")
 def get_causal_chain(book_id: str):
     s = sm(book_id)
     ws = s.read_world_state()
-    return dc_to_dict(ws.causal_chain)
+    return dc_to_dict(getattr(ws, "causal_chain", []))
 
 
-@router.get("/{{book_id}}/emotional-arcs")
+@router.get("/{book_id}/emotional-arcs")
 def get_emotional_arcs(book_id: str):
     s = sm(book_id)
     ws = s.read_world_state()
@@ -28,17 +28,17 @@ def get_emotional_arcs(book_id: str):
     return arcs
 
 
-@router.get("/{{book_id}}/hooks")
+@router.get("/{book_id}/hooks")
 def get_hooks(book_id: str, status: str | None = None):
     s = sm(book_id)
     ws = s.read_world_state()
-    hooks = dc_to_dict(ws.pending_hooks)
+    hooks = dc_to_dict(getattr(ws, "pending_hooks", []))
     if status:
         hooks = [h for h in hooks if h.get("status") == status]
     return hooks
 
 
-@router.post("/{{book_id}}/hooks/{{hook_id}}/resolve")
+@router.post("/{book_id}/hooks/{hook_id}/resolve")
 def resolve_hook_api(book_id: str, hook_id: str, body: dict | None = None):
     s = sm(book_id)
     chapter = (body or {}).get("chapter")
@@ -49,12 +49,12 @@ def resolve_hook_api(book_id: str, hook_id: str, body: dict | None = None):
     return {"ok": True, "hook_id": hook_id, "resolved_in_chapter": int(chapter)}
 
 
-@router.post("/{{book_id}}/hooks/{{hook_id}}/reopen")
+@router.post("/{book_id}/hooks/{hook_id}/reopen")
 def reopen_hook_api(book_id: str, hook_id: str):
     from core.types.state import HookStatus
     s = sm(book_id)
     ws = s.read_world_state()
-    for hook in ws.pending_hooks:
+    for hook in getattr(ws, "pending_hooks", []):
         if hook.id == hook_id:
             hook.status = HookStatus.OPEN
             hook.resolved_in_chapter = None
@@ -64,14 +64,14 @@ def reopen_hook_api(book_id: str, hook_id: str):
     return {"ok": True, "hook_id": hook_id}
 
 
-@router.get("/{{book_id}}/relationships")
+@router.get("/{book_id}/relationships")
 def get_relationships(book_id: str):
     s = sm(book_id)
     ws = s.read_world_state()
     return dc_to_dict(ws.relationships)
 
 
-@router.get("/{{book_id}}/quality-dashboard")
+@router.get("/{book_id}/quality-dashboard")
 def api_quality_dashboard(book_id: str):
     s = sm(book_id)
     from core.quality_dashboard import QualityDashboard
@@ -79,7 +79,7 @@ def api_quality_dashboard(book_id: str):
     return dashboard.get_summary()
 
 
-@router.get("/{{book_id}}/kb-queries")
+@router.get("/{book_id}/kb-queries")
 def api_kb_queries(book_id: str):
     from core.agents import get_kb_queries
     queries = get_kb_queries()
