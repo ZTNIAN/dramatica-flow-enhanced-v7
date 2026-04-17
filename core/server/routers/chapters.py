@@ -11,7 +11,7 @@ from ..deps import sm
 router = APIRouter(prefix="/api/books", tags=["chapters"])
 
 
-@router.get("/{{book_id}}/chapters")
+@router.get("/{book_id}/chapters")
 def list_chapters(book_id: str):
     s = sm(book_id)
     chapters = []
@@ -28,7 +28,7 @@ def list_chapters(book_id: str):
     return chapters
 
 
-@router.post("/{{book_id}}/chapters/{{chapter}}/promote")
+@router.post("/{book_id}/chapters/{chapter}/promote")
 def promote_chapter(book_id: str, chapter: int):
     s = sm(book_id)
     draft = s.read_draft(chapter)
@@ -45,7 +45,7 @@ def promote_chapter(book_id: str, chapter: int):
     return {"ok": True, "message": f"第 {chapter} 章已升级为最终稿"}
 
 
-@router.get("/{{book_id}}/chapters/{{chapter}}")
+@router.get("/{book_id}/chapters/{chapter}")
 def get_chapter(book_id: str, chapter: int):
     s = sm(book_id)
     content = s.read_final(chapter) or s.read_draft(chapter)
@@ -55,7 +55,7 @@ def get_chapter(book_id: str, chapter: int):
     return {"number": chapter, "kind": kind, "content": content, "chars": len(content)}
 
 
-@router.put("/{{book_id}}/chapters/{{chapter}}/content")
+@router.put("/{book_id}/chapters/{chapter}/content")
 def update_chapter_content(book_id: str, chapter: int, req: dict):
     content = req.get("content", "")
     kind = req.get("kind", "draft")
@@ -68,7 +68,7 @@ def update_chapter_content(book_id: str, chapter: int, req: dict):
     return {"ok": True, "chars": len(content)}
 
 
-@router.get("/{{book_id}}/hook-designs")
+@router.get("/{book_id}/hook-designs")
 def api_hook_designs(book_id: str):
     s = sm(book_id)
     outline_path = s.state_dir / "outline.json"
