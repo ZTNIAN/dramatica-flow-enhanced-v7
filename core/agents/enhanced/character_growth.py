@@ -74,16 +74,15 @@ class CharacterGrowthExpert:
     ) -> CharacterGrowthResult:
         kb_section = ""
         if _KB_CHAR_GROWTH:
-            kb_section = f"\n## 角色成长方法论\n{_KB_CHAR_GROWTH[:3000]}\n"
+            kb_section = f"\n## 角色成长方法论\n{_KB_CHAR_GROWTH[:1500]}\n"
 
-        prompt = f"""你是资深的角色设计师，精通角色塑造和成长弧线规划。
-请为以下世界观中的每个主要角色生成详细的成长档案。
+        prompt = f"""你是资深的角色设计师。请为以下角色生成成长档案（每个角色精简输出）。
 
 ## 世界观
-{world_context[:3000]}
+{world_context[:2000]}
 
-## 角色列表
-{characters_json[:3000]}
+## 角色
+{characters_json[:2000]}
 {kb_section}
 ## 输出要求（JSON）
 {{"profiles": [

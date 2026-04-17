@@ -52,20 +52,17 @@ async def api_character_growth(book_id: str, req: CharacterGrowthReq | None = No
     if not world_context:
         world_context = json.dumps(characters, ensure_ascii=False)
 
-    # 将角色列表转为 JSON 字符串
-    characters_json = json.dumps(characters, ensure_ascii=False)
-
     try:
-        if req and req.character_id:
-            # 单角色模式：只规划指定角色
-            chars = [c for c in characters if c.get("id") == req.character_id]
-            if not chars:
-                raise HTTPException(404, f"角色 {req.character_id} 不存在")
-            single_char_json = json.dumps(chars, ensure_ascii=False)
-            result = await run_sync(expert.plan_character_growth, world_context, single_char_json)
-        else:
-            # V7: 规划所有角色（一次调用，Agent 内部遍历）
-            result = await run_sync(expert.plan_character_growth, world_context, characters_json)
+        # 逐角色调用，避免单次响应超过 8192 max_tokens
+        all_results = []
+        for char in characters:
+            try:
+                single_json = json.dumps([char], ensure_ascii=False)
+                r = await run_sync(expert.plan_character_growth, world_context, single_json)
+                all_results.append(dc_to_dict(r))
+            except Exception as ce:
+                all_results.append({"character": char.get("name", "?"), "error": str(ce)})
+        result = all_results[0] if len(all_results) == 1 else {"characters": all_results}
         if isinstance(result, dict):
             # 持久化到文件
             try:
