@@ -720,6 +720,7 @@ async function loadStep3(forceSelect) {
           <button class="btn btn-lg" onclick="toggleSection('world-view')" style="border-color:var(--green);color:var(--green)">&#127758; 查看世界观</button>
           <button class="btn btn-lg" onclick="runCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128101; 角色成长规划</button>
           <button class="btn btn-lg" onclick="toggleSection('char-growth-result')" style="border-color:var(--purple);color:var(--purple)">&#128065; 查看成长档案</button>
+          <button class="btn btn-lg" onclick="toggleSection('ch-outlines-view');loadChOutlinesView()" style="border-color:var(--orange);color:var(--orange)">&#128221; 查看章纲</button>
           <button class="btn btn-lg" onclick="toggleSection('edit-options')" style="border-color:var(--blue);color:var(--blue)">&#9998; 修改世界观</button>
         </div>
         <div id="edit-options" style="display:none;margin-top:16px">
@@ -747,6 +748,7 @@ async function loadStep3(forceSelect) {
           </div>
         </div>
         <div id="world-view" style="display:none;margin-top:16px"></div>
+        <div id="ch-outlines-view" style="display:none;margin-top:16px"></div>
       </div>`;
     // 自动加载世界观内容和角色成长档案
     loadWorldView().catch(() => {});
@@ -3768,6 +3770,39 @@ function toggleSection(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+
+async function loadChOutlinesView() {
+  if (!currentBook) return;
+  const panel = document.getElementById('ch-outlines-view');
+  if (!panel) return;
+  try {
+    const cos = await api(`/books/${currentBook.id}/chapter-outlines`);
+    if (!cos || !Array.isArray(cos) || cos.length === 0) {
+      panel.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text2)">暂无章纲，请先在步骤4生成章节大纲。</div>';
+      return;
+    }
+    let html = '<div style="text-align:left;max-width:700px;margin:0 auto">';
+    html += '<div style="font-weight:600;margin-bottom:12px;font-size:14px">&#128221; 章节大纲（共 ' + cos.length + ' 章）</div>';
+    html += '<div style="display:flex;flex-direction:column;gap:6px">';
+    cos.forEach((co, i) => {
+      const ch = co.chapter_number || co.chapter || i+1;
+      const title = esc(co.title || '未命名');
+      const summary = esc(co.summary || co.purpose || '');
+      const words = co.target_words || co.word_target || '-';
+      html += '<div style="padding:10px 12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid var(--orange)">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+      html += '<div style="font-size:12px;font-weight:600;color:var(--orange)">Ch.' + ch + ' ' + title + '</div>';
+      html += '<div style="font-size:11px;color:var(--text3)">' + words + '字</div></div>';
+      if (summary) html += '<div style="font-size:11px;color:var(--text3);margin-top:4px">' + summary + '</div>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+    panel.innerHTML = html;
+  } catch (e) {
+    panel.innerHTML = '<div style="padding:16px;text-align:center;color:var(--red)">加载章纲失败: ' + esc(e.message) + '</div>';
+  }
 }
 
 async function loadWorldView() {
