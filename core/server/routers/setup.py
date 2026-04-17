@@ -15,7 +15,7 @@ from ..deps import (
 router = APIRouter(prefix="/api/books", tags=["setup"])
 
 
-@router.get("/{{book_id}}/setup/status")
+@router.get("/{book_id}/setup/status")
 def setup_status(book_id: str):
     s = sm(book_id)
     setup_dir = s.book_dir / "setup"
@@ -40,7 +40,7 @@ def setup_status(book_id: str):
     return {"has_templates": has_templates, "has_setup_state": has_setup_state, "has_outline": has_outline, "files": files_status}
 
 
-@router.post("/{{book_id}}/setup/init")
+@router.post("/{book_id}/setup/init")
 def setup_init_templates(book_id: str):
     from core.setup import SetupLoader
     loader = SetupLoader(PROJECT_ROOT, book_id)
@@ -48,7 +48,7 @@ def setup_init_templates(book_id: str):
     return {"ok": True}
 
 
-@router.get("/{{book_id}}/setup/{{file_type}}")
+@router.get("/{book_id}/setup/{file_type}")
 def setup_read(book_id: str, file_type: str):
     s = sm(book_id)
     setup_dir = s.book_dir / "setup"
@@ -64,7 +64,7 @@ def setup_read(book_id: str, file_type: str):
     return {"content": path.read_text(encoding="utf-8"), "template": template_default}
 
 
-@router.put("/{{book_id}}/setup/{{file_type}}")
+@router.put("/{book_id}/setup/{file_type}")
 def setup_save(book_id: str, file_type: str, req: SaveSetupReq):
     s = sm(book_id)
     setup_dir = s.book_dir / "setup"
@@ -82,7 +82,7 @@ def setup_save(book_id: str, file_type: str, req: SaveSetupReq):
     return {"ok": True, "message": f"{filename} 已保存"}
 
 
-@router.post("/{{book_id}}/setup/load")
+@router.post("/{book_id}/setup/load")
 def setup_load(book_id: str):
     from core.setup import SetupLoader
     try:
