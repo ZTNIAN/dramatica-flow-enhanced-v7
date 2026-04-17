@@ -256,7 +256,7 @@ async def ai_generate_chapter_outlines(book_id: str):
 - title: 章标题
 - summary: 章节概述
 - beats: 情节节拍数组（每个含 id, description, dramatic_function）
-- emotional_arc: {"start": "起始情绪", "end": "结束情绪"}
+- emotional_arc: {{"start": "起始情绪", "end": "结束情绪"}}
 - target_words: 目标字数
 
 返回 JSON 数组。"""
