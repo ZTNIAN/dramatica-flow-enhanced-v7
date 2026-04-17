@@ -343,6 +343,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 - 拆分为 2-4 个场景，每个场景包含地点、人物、冲突、情节节拍
 - 规划伏笔植入点和章末钩子
 - 情绪弧线要与章纲一致
+- word_budget 是硬约束：所有场景的 word_budget 之和必须等于 {target_words}，系统会自动修正，请按比例分配
 
 返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "word_budget": {target_words//3}, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
     try:
@@ -350,6 +351,20 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         import json as _json, re as _re
         data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
         data["chapter"] = req.chapter
+
+        # ── 场景字数归一化：按 target_words 重新分配，保证节奏精确 ──
+        scenes = data.get("scenes", [])
+        if scenes:
+            n = len(scenes)
+            base = target_words // n
+            remainder = target_words % n
+            for i, sc in enumerate(scenes):
+                sc["word_budget"] = base + (1 if i < remainder else 0)
+            # 写回总计校验
+            total_check = sum(sc["word_budget"] for sc in scenes)
+            if total_check != target_words and scenes:
+                scenes[-1]["word_budget"] += target_words - total_check
+
         out_dir = s.state_dir / "detailed_outlines"
         out_dir.mkdir(exist_ok=True)
         (out_dir / f"ch{req.chapter:04d}.json").write_text(
