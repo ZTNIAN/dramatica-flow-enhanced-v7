@@ -718,6 +718,7 @@ async function loadStep3(forceSelect) {
         <div style="display:flex;gap:8px;justify-content:center;margin-top:20px">
           <button class="btn btn-primary btn-lg" onclick="unlockStep(4);goStep(4)">进入大纲 &#8250;</button>
           <button class="btn btn-lg" onclick="runCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128101; 角色成长规划</button>
+          <button class="btn btn-lg" onclick="loadCharacterGrowth()" style="border-color:var(--purple);color:var(--purple)">&#128065; 查看成长档案</button>
         </div>
       </div>`;
     return;
@@ -3729,6 +3730,51 @@ async function runCharacterGrowth() {
       toast('生成失败', false);
     }
   } catch (e) { toast('请求失败: ' + e.message, false); }
+}
+
+// ── V7.2: 查看已保存的角色成长档案 ──────────────────────────────────────
+
+async function loadCharacterGrowth() {
+  if (!currentBook) { toast('请先选择书籍', false); return; }
+  toast('正在加载角色成长档案...', 'loading');
+  try {
+    const res = await api(`/books/${currentBook.id}/character-growth`);
+    if (!res.ok || !res.result) { toast('暂无角色成长档案，请先生成', false); return; }
+    _renderCharacterGrowth(res.result);
+    toast('角色成长档案已加载', true);
+  } catch (e) { toast('加载失败: ' + e.message, false); }
+}
+
+function _renderCharacterGrowth(data) {
+  const profiles = data.profiles || data.characters || [];
+  let html = '<div class="card" style="border-color:var(--purple)"><div class="card-header" style="color:var(--purple)">&#10003; 角色成长档案</div>';
+  (Array.isArray(profiles) ? profiles : []).forEach(p => {
+    if (p.error) { html += `<div style="color:var(--red);padding:8px">${esc(p.character)}: ${esc(p.error)}</div>`; return; }
+    if (p.profiles) { p.profiles.forEach(sp => _renderProfile(sp)); return; }
+    _renderProfile(p);
+    function _renderProfile(sp) {
+      html += `<div style="margin-bottom:16px;padding:12px;background:var(--bg-dark);border-radius:6px">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px">${esc(sp.name)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+          <div><span style="color:var(--text3)">核心性格：</span>${esc(sp.personality?.core||'-')}</div>
+          <div><span style="color:var(--text3)">性格缺陷：</span>${esc(sp.personality?.flaw||'-')}</div>
+          <div><span style="color:var(--text3)">初期状态：</span>${esc(sp.growth_trajectory?.early||'-')}</div>
+          <div><span style="color:var(--text3)">终局状态：</span>${esc(sp.growth_trajectory?.final||'-')}</div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3)">转折点：${(sp.turning_points||[]).map(t=>t.description||t.turning||'').join(' → ')}</div>
+      </div>`;
+    }
+  });
+  const note = data.overall_note || (data.characters && data.characters[0]?.overall_note) || '';
+  if (note) html += `<div style="font-size:12px;color:var(--text2);margin-top:8px">${esc(note)}</div>`;
+  html += '</div>';
+  const panel = document.getElementById('step3-panel');
+  const existing = document.getElementById('char-growth-result');
+  if (existing) existing.remove();
+  const div = document.createElement('div');
+  div.id = 'char-growth-result';
+  div.innerHTML = html;
+  panel.prepend(div);
 }
 
 // ── V4: 对话审查 ─────────────────────────────────────────────────────────
