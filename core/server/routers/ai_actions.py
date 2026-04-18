@@ -472,7 +472,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         fp = s.state_dir / fname
         if fp.exists():
             try:
-                world_ctx_parts.append(f"## {fname}\n{fp.read_text(encoding='utf-8')[:2000]}")
+                world_ctx_parts.append(f"## {fname}\n{fp.read_text(encoding='utf-8')[:1200]}")
             except Exception:
                 pass
     world_context = "\n\n".join(world_ctx_parts) if world_ctx_parts else "（世界观信息暂缺）"
@@ -609,8 +609,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent ──
     from core.agents import WriterAgent
-    # 中文1字≈1.5-2 tokens，按target_words*3计算，上限DeepSeek 8192
-    chapter_max_tokens = min(8192, max(4096, int(target_words * 3)))
+    chapter_max_tokens = min(8192, max(2048, int(target_words * 1.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
