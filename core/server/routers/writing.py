@@ -381,6 +381,75 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
         raise HTTPException(500, f"修订失败：{e}")
 
 
+@router.post("/{book_id}/auto-revise-loop")
+async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: int = Query(3)):
+    """循环自动修订：审计→修订→再审计，直到通过或达到上限"""
+    load_env()
+    s = sm(book_id)
+    from core.agents import ReviserAgent, AuditorAgent, ArchitectBlueprint, PreWriteChecklist, PostWriteSettlement
+    from core.types.state import TruthFileKey
+
+    auditor_llm = create_llm(temperature=0.0, model_env="AUDITOR_MODEL")
+    auditor = AuditorAgent(auditor_llm)
+    reviser_llm = create_llm()
+    reviser = ReviserAgent(reviser_llm)
+    blueprint = ArchitectBlueprint(
+        core_conflict="", hooks_to_advance=[], hooks_to_plant=[],
+        emotional_journey={}, chapter_end_hook="", pace_notes="",
+        pov_character_id="",
+        pre_write_checklist=PreWriteChecklist([], [], [], [], ""),
+    )
+    truth_ctx = s.read_truth_bundle([TruthFileKey.CURRENT_STATE, TruthFileKey.PENDING_HOOKS])
+    settlement = PostWriteSettlement([], [], [], [], [])
+
+    rounds_log = []
+    for round_num in range(1, max_rounds + 1):
+        content = s.read_final(chapter) or s.read_draft(chapter)
+        if not content:
+            raise HTTPException(404, f"第 {chapter} 章不存在")
+
+        try:
+            report = await run_sync(auditor.audit_chapter, content, chapter, blueprint, truth_ctx, settlement,
+                                     cross_thread_context="")
+        except Exception as e:
+            rounds_log.append({"round": round_num, "error": f"审计失败: {e}"})
+            break
+
+        passed = report.passed
+        issue_count = len(report.issues)
+        rounds_log.append({
+            "round": round_num, "passed": passed,
+            "issues_count": issue_count, "weighted_total": report.weighted_total,
+        })
+
+        if passed:
+            break
+
+        # Revision
+        critical = [i for i in report.issues if i.severity == "critical"]
+        if not critical:
+            # Force warnings to critical so reviser processes them
+            from core.agents.auditor import AuditIssue as _AI, AuditSeverity as _AS
+            forced_issues = [_AI(dimension=i.dimension, severity="critical",
+                                 description=i.description, location=i.location,
+                                 suggestion=i.suggestion, excerpt=i.excerpt) for i in report.issues]
+        else:
+            forced_issues = report.issues
+
+        try:
+            result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
+            s.save_draft(chapter, result.content)
+            s.save_final(chapter, result.content)
+            rounds_log[-1]["changes"] = result.change_log
+        except Exception as e:
+            rounds_log[-1]["error"] = f"修订失败: {e}"
+            break
+
+    final_content = s.read_final(chapter) or s.read_draft(chapter)
+    return {"ok": True, "rounds": rounds_log, "total_rounds": len(rounds_log),
+            "final_passed": rounds_log[-1].get("passed", False) if rounds_log else False}
+
+
 @router.get("/{book_id}/audit-results/{chapter}")
 def get_audit_result(book_id: str, chapter: int):
     s = sm(book_id)
@@ -655,3 +724,11 @@ def register_legacy_routes(app):
         """旧路径兼容：/api/action/revise → /{book_id}/revise"""
         logging.warning("[deprecated] /api/action/revise 已弃用，请改用 /api/books/{book_id}/revise")
         return await action_revise(book_id, chapter, mode)
+
+    @app.post("/api/action/auto-revise-loop")
+    async def legacy_auto_revise_loop(
+        book_id: str = Query(...),
+        chapter: int = Query(...),
+        max_rounds: int = Query(3),
+    ):
+        return await auto_revise_loop(book_id, chapter, max_rounds)
