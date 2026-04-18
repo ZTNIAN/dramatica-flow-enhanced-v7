@@ -657,7 +657,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent（逐场景调用，确保每个场景都覆盖） ──
     from core.agents import WriterAgent
-    chapter_max_tokens = min(8192, max(2048, int(target_words * 2.5)))
+    chapter_max_tokens = min(8192, max(2048, int(target_words * 3.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
@@ -733,7 +733,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _prior_ctx = ""
                 if _all_parts:
                     _written_so_far = "\n\n".join(_all_parts)
-                    _prior_ctx = f"### 本章已写内容（续写时直接接续，不要重复以上内容）\n{_written_so_far[-600:]}"
+                    _prior_ctx = f"### 本章已写内容（续写时直接接续，不要重复以上内容）\n{_written_so_far[-400:]}"
                 else:
                     _prior_ctx = prior_summaries
 
