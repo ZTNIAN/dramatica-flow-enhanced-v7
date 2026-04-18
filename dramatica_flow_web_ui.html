@@ -2698,6 +2698,7 @@ function loadStep6() {
           <div style="display:flex;gap:8px;margin-bottom:8px">
             <button class="btn btn-primary" style="flex:1" onclick="runThreeLayerAudit()">&#128269; 开始审计</button>
             <button class="btn btn-warning" onclick="doRevise()">&#128295; 自动修订</button>
+            <button class="btn btn-primary" onclick="doAutoReviseLoop()" style="margin-left:6px">&#128260; 循环自动修订</button>
           </div>
           <!-- 标签页切换 -->
           <div class="mode-tabs" style="margin-bottom:8px;flex-wrap:wrap">
@@ -3365,6 +3366,32 @@ async function doRevise() {
     if (!res.ok && res.stderr) toast(res.stderr, false);
     await loadBookData();
   } catch (e) { toast('修订失败: ' + e.message, false); }
+}
+
+async function doAutoReviseLoop() {
+  const ch = parseInt(document.getElementById('audit-chapter')?.value);
+  if (!ch) return toast('请选择章节', false);
+  toast('正在循环自动修订（最多3轮，约1-2分钟）...', 'loading');
+  try {
+    const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=3`, {
+      method: 'POST',
+    });
+    if (!res.ok) { toast('循环修订失败', false); return; }
+    const rounds = res.rounds || [];
+    let summary = `共 ${res.total_rounds} 轮`;
+    if (res.final_passed) {
+      summary += '，审计通过 ✅';
+    } else {
+      summary += `，仍有问题（最后一轮 ${rounds[rounds.length-1]?.issues_count || '?'} 个）`;
+    }
+    rounds.forEach(r => {
+      summary += `\n第${r.round}轮: ${r.passed ? '✅通过' : '❌' + (r.issues_count||0) + '个问题'}`;
+    });
+    toast(summary, res.final_passed);
+    await loadBookData();
+    // Re-run audit to show final result
+    if (typeof runThreeLayerAudit === 'function') runThreeLayerAudit();
+  } catch (e) { toast('循环修订失败: ' + e.message, false); }
 }
 
 // ── Step 7: 导出 ──────────────────────────────────────────────────────────
