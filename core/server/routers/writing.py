@@ -425,13 +425,16 @@ async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
 
         if original and len(original) > 20 and original in content:
             # Targeted fix: rewrite the specific excerpt (only when it's real, not frontend fallback)
-            result = await run_sync(reviser.revise, original, [], mode="spot-fix")
+            from core.agents.auditor import AuditIssue
+            fake_issues = [AuditIssue(dimension="综合", severity="critical",
+                                     description=instruction, suggestion=instruction)]
+            result = await run_sync(reviser.revise, original, fake_issues, mode="spot-fix")
             pos = content.find(original)
             new_content = content[:pos] + result.content + content[pos + len(original):]
         else:
-            # Audit "AI 修复此问题": pass instruction as an issue for full-chapter guided revision
+            # Audit "AI 修复此问题": pass instruction as critical issue for guided revision
             from core.agents.auditor import AuditIssue
-            fake_issues = [AuditIssue(dimension="综合", severity="warning",
+            fake_issues = [AuditIssue(dimension="综合", severity="critical",
                                      description=instruction, suggestion=instruction)]
             result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
             new_content = result.content
