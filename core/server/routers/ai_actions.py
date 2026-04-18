@@ -824,15 +824,25 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         # 1. 字数截断
         max_chars = int(target_words * 1.2)
         if len(content) > max_chars:
-            cut_pos = content.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
-            if cut_pos > int(target_words * 0.8):
-                content = content[:cut_pos]
+            _lower = int(target_words * 0.6)
+            _upper = len(content)
+            # 优先按场景分隔符截断
+            cut_pos = content.rfind("***", _lower, _upper)
+            if cut_pos > _lower:
+                content = content[:cut_pos].rstrip()
             else:
-                cut_pos = content.rfind("。", int(target_words * 0.8), max_chars + 100)
-                if cut_pos > int(target_words * 0.8):
-                    content = content[:cut_pos+1]
+                # 按段落截断
+                cut_pos = content.rfind("\n\n", _lower, _upper)
+                if cut_pos > _lower:
+                    content = content[:cut_pos]
                 else:
-                    content = content[:max_chars]
+                    # 按句号截断
+                    cut_pos = content.rfind("。", _lower, _upper)
+                    if cut_pos > _lower:
+                        content = content[:cut_pos+1]
+                    else:
+                        content = content[:max_chars]
+            logging.info(f"[V7.14] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
         # 2. 结尾钩子后处理
         if _hook_text:
             _found = False
