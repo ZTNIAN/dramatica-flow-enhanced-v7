@@ -12,11 +12,12 @@ from ..llm import LLMProvider, LLMMessage, parse_llm_json, with_retry
 from ..types.narrative import Character
 from ..narrative import ChapterOutlineSchema
 
-from .kb import KB_REVIEW_CRITERIA_95, KB_REDLINES, KB_ANTI_AI, track_kb_query
+from .kb import KB_REVIEW_CRITERIA_95, KB_REDLINES, KB_ANTI_AI, KB_REVIEWER_CHECKLIST, track_kb_query
 
 _KB_REVIEW_CRITERIA_95 = KB_REVIEW_CRITERIA_95
 _KB_REDLINES = KB_REDLINES
 _KB_ANTI_AI = KB_ANTI_AI
+_KB_REVIEWER_CHECKLIST = KB_REVIEWER_CHECKLIST
 
 @dataclass
 class AuditIssue:
@@ -269,11 +270,11 @@ class AuditorAgent:
         def _call() -> AuditReport:
             # 记录知识库查询
             if _KB_REVIEWER_CHECKLIST:
-                _track_kb_query("auditor", "reviewer-checklist.md", "审查者检查清单")
+                track_kb_query("auditor", "reviewer-checklist.md", "审查者检查清单")
             if _KB_REDLINES:
-                _track_kb_query("auditor", "redlines.md", "红线检查")
+                track_kb_query("auditor", "redlines.md", "红线检查")
             if _KB_REVIEW_CRITERIA_95:
-                _track_kb_query("auditor", "review-criteria-95.md", "95分标准")
+                track_kb_query("auditor", "review-criteria-95.md", "95分标准")
 
             resp = self.llm.complete([
                 LLMMessage(
