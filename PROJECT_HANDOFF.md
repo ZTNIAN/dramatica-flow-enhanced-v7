@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-18（V7.7 修订质量+循环修订增强）
-> 版本：V7.7（V7.6 + AI修复保存逻辑+字数控制+修订质量+循环轮数提升，修复4个BUG+3项改进）
+> 最后更新：2026-04-18（V7.9 场景覆盖修复：逐场景LLM调用）
+> 版本：V7.9（V7.8 + 正文场景覆盖彻底修复：逐场景LLM调用+max_tokens提升+场景字数分配表，修复3个BUG+回退2个无效改动）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -50,7 +50,8 @@
 | **V7.5** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文端到端+细纲加载修复5个BUG |
 | **V7.6** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 审计+修订管线完整可用，修复12个BUG |
 | **V7.7** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 修订质量+循环修订增强，修复4个BUG+3项改进 |
-| **V7.8（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文生成质量修复：蓝图剥离+场景覆盖+字数分配，修复3个BUG |
+| **V7.8** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文生成质量修复：蓝图剥离+场景覆盖+字数分配，修复3个BUG |
+| **V7.9（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 场景覆盖彻底修复：逐场景LLM调用，修复3个BUG+回退2个无效改动 |
 
 ### 本地部署位置
 
@@ -832,6 +833,107 @@ curl -sL "https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/ma
 
 #### 坑45：前后端字段名差异是反复出现的问题
 本次 8 个 BUG 中有 4 个是前后端字段/API 参数不匹配（坑48/50/51/55）。**根因**：Web UI 和后端由不同时间/方式开发，字段命名没有统一约束。**建议**：新增 API 端点时，先定义前后端的字段契约（哪怕只是注释），再同时开发。
+
+---
+
+## 十八、V7.9 修复（云服务器镜像调试 2026-04-18）
+
+### 背景
+
+V7.8 实现了蓝图剥离+场景字数分配，但用户实测发现正文仍然只覆盖了细纲4个场景中的前2个（场景3和4缺失或极度压缩）。核心矛盾：**LLM 不遵守 prompt 中的字数约束，场景1（目标462字）每次写到1000+字，吃掉后面场景的输出空间**。经过4轮迭代尝试，最终确定"逐场景LLM调用"为唯一可靠方案。
+
+### 问题分析过程
+
+| 轮次 | 尝试方案 | 结果 | 原因分析 |
+|------|---------|------|---------|
+| 1 | max_tokens 1.5x→2.5x + 场景字数分配表 + 铁律④ | ❌ 无改善 | token 不是瓶颈（实际只用了3000/5000），LLM 自己"收工" |
+| 2 | 铁律⑤进度标记 `[场景N/M 完]` + 后处理验证 | ❌ 更差（场景3完全消失） | 增加 prompt 复杂度反而让 LLM 更混乱 |
+| 3 | 分2次调用（场景1-2 + 场景3-4） | ❌ 未生效 | WSL 环境未更新代码 + 即使生效，每半次仍然膨胀前半场景 |
+| 4 | **逐场景调用（1场景=1次LLM调用）** | ✅ 代码已实现 | 每次只给 LLM 一个场景，物理上不可能跳过或膨胀其他场景 |
+
+### 关键发现
+
+> **LLM 不遵守字数约束是行为特性，不是 prompt 问题。** 无论怎么加提示、加标记、加铁律，LLM 看到强冲突场景（如"老陈被带走"）就会自然膨胀。解决办法不是靠 LLM 自觉，而是靠**架构设计**——每次只给一个场景。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 64 | `core/server/routers/ai_actions.py` | max_tokens 3000 不够4个场景+结算表 | 2000字×1.5=3000 token，但实际需要4000-4500 token | 乘数 1.5→2.5（3000→5000 token） |
+| 65 | `core/agents/writer.py` | LLM 不知道每个场景该写多少字 | scene_summaries 只有 beats 描述，没有显式字数预算 | 自动解析细纲 word_budget，生成场景字数分配表注入 prompt |
+| 66 | `core/server/routers/ai_actions.py` | 4个场景塞不进一次 LLM 输出 | LLM 把80%输出花在前2个场景，后2个被挤掉 | 改为逐场景调用：每个场景单独一次 LLM 请求，最后拼接 |
+
+### 回退的无效改动
+
+| 改动 | 版本 | 回退原因 |
+|------|------|---------|
+| 铁律⑤（进度标记） | V7.10 | 增加 prompt 复杂度，LLM 反而更混乱 |
+| 后处理第5轮（标记验证+剥离） | V7.10 | 配合铁律⑤，一起回退 |
+
+### 保留的改动
+
+| 改动 | 文件 | 说明 |
+|------|------|------|
+| max_tokens 2.5x | `ai_actions.py` | `target_words * 2.5`，上限8192 |
+| 场景字数分配表 | `writer.py` | 自动解析 `_scene_budgets` 生成 prompt 中的分配表 |
+| 铁律④（字数控制） | `writer.py` | "每个场景字数严格控制在预算内，精练推进" |
+| **逐场景调用** | `ai_actions.py` | 核心改动：`_scenes_list` 解析→`for`循环逐个调用→拼接 |
+| `import re` | `writer.py` | 顶层导入 re 模块（用于场景名正则解析） |
+
+### 逐场景调用逻辑
+
+```python
+# 从详细大纲 JSON 解析出场景列表
+_scenes_list = [(header, beats, budget_int), ...]
+
+if len(_scenes_list) <= 2:
+    # 单次调用（兼容章纲模式）
+    result = writer.write_chapter(scene_summaries, ...)
+else:
+    # 逐场景调用
+    for _idx, (_header, _beats, _budget) in enumerate(_scenes_list):
+        _scene_summary = f"{_header}\n{_beats}"  # 只传这一个场景
+        _scene_target = _budget  # 用细纲的 word_budget
+        _prior_ctx = 已写内容[-800:]  # 前面的场景作为上下文
+        result = writer.write_chapter(_scene_summary, ...)
+        _all_parts.append(result.content)
+    content = "\n\n".join(_all_parts)  # 拼接所有场景
+```
+
+### 当前状态
+
+⏳ **逐场景调用已部署到 GitHub，WSL 端正在从头端到端测试**
+- 书籍数据因 re-clone 丢失，需要重新走全流程
+- `.env` 和 `.venv` 需重建
+- 待验证：4个场景是否全部以完整小说正文呈现
+
+### WSL 更新方式
+
+由于 git pull 在 WSL 下有 TLS 问题，推荐用 curl 单文件覆盖：
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+curl -sL "https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/core/server/routers/ai_actions.py" -o core/server/routers/ai_actions.py
+curl -sL "https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/core/agents/writer.py" -o core/agents/writer.py
+# 重启 uvicorn
+```
+
+### 踩坑记录（新增）
+
+#### 坑53：max_tokens 不够 ≠ token 被截断
+max_tokens=3000 时输出约2500字就停了，看起来像是 token 耗尽。但把 max_tokens 提到5000后，输出仍然是2500字——LLM 是自己"收工"了，不是被截断。**规则**：不要用 max_tokens 来控制输出长度，它只是上限，不是目标。LLM 会在它认为"写完了"的时候自然停止。
+
+#### 坑54：LLM 不遵守字数约束是常态中的常态
+prompt 写"场景1目标462字"，LLM 写1000字。加了铁律、加了进度标记、加了字数分配表，都没用。**根本解决方案**：每次只给 LLM 一个场景，物理上限制它能写的内容范围。prompt 层面的约束只能做"提示"，不能做"控制"。
+
+#### 坑55：WSL 下 git pull 有 TLS 问题，curl 下载也可能有坑
+git pull 经常卡住（GnuTLS recv error -110）。curl 下载文件看起来成功（显示下载字节数），但文件可能没写入磁盘，或者写入后 `grep`/`cat`/`wc` 等命令看不到输出（WSL 终端 stdout 异常）。**解决方案**：用 Python `urllib` 下载并验证，或直接 `rm -rf` 重新 clone。
+
+#### 坑56：re-clone 会丢失 books/ 目录和 .env
+`books/` 和 `.env` 在项目目录内但不在 git 中。`rm -rf` + re-clone 会丢失所有书籍数据和配置。**规则**：re-clone 前先备份 `books/` 和 `.env` 到项目外。或者把 `BOOKS_DIR` 配置到项目外的绝对路径。
+
+#### 坑57：终端 stdout 可能"静默失败"
+WSL 某些情况下 `echo "hello"` 都没有输出，但命令实际执行成功了（文件写入了、curl 下载了）。遇到这种情况不要相信终端输出，用 `ls -la` 或 Python 脚本验证文件是否存在。
 
 ---
 
