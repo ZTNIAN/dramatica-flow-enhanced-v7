@@ -376,7 +376,7 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
         result = await run_sync(reviser.revise, content, report.issues, mode)
         s.save_draft(chapter, result.content)
         s.save_final(chapter, result.content)
-        return {"ok": True, "changes": result.changes_summary, "issues_count": len(report.issues)}
+        return {"ok": True, "changes": result.change_log, "issues_count": len(report.issues)}
     except Exception as e:
         raise HTTPException(500, f"修订失败：{e}")
 
@@ -445,7 +445,7 @@ async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
             new_content = result.content
 
         s.save_draft(req.chapter, new_content)
-        return {"ok": True, "rewritten": new_content, "changes": result.changes_summary}
+        return {"ok": True, "rewritten": new_content, "changes": result.change_log}
     except HTTPException:
         raise
     except Exception as e:
