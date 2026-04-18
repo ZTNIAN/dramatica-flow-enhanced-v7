@@ -583,7 +583,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         try:
             do = json.loads(do_path.read_text(encoding="utf-8"))
             hooks_to_plant = do.get("hooks_to_plant", [])
-            chapter_end_hook = do.get("chapter_end_hook", "")
+            chapter_end_hook = do.get("chapter_end_hook", "") or do.get("结尾钩子", "") or do.get("ending_hook", "")
             ea = do.get("emotional_arc", {})
             if ea:
                 emotional_journey = {"start": ea.get("start", "平静"), "end": ea.get("end", "紧张")}
@@ -759,12 +759,18 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 # ── 场景级字数截断：超过 budget×1.2 强制截断 ──
                 if _scene_target > 0:
                     _max_scene_chars = int(_scene_target * 1.2)
-                    if len(_part) > _max_scene_chars:
+                    _raw_len = len(_part)
+                    if _raw_len > _max_scene_chars:
                         _cut = _part.rfind("。", int(_scene_target * 0.8), _max_scene_chars + 100)
                         if _cut > int(_scene_target * 0.8):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
+                        logger.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars -> {len(_part)}chars (target={_scene_target}, max={_max_scene_chars})")
+                    else:
+                        logger.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars (target={_scene_target}, max={_max_scene_chars}, NO TRUNCATE)")
+                else:
+                    logger.info(f"[V7.12] Scene{_idx+1}: _scene_target={_scene_target}, SKIPPING truncation")
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
@@ -789,24 +795,41 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
             content = "\n\n".join(_all_parts)
             settlement = _settlement
+            logger.info(f"[V7.12] Per-scene done: {_scene_count} scenes, total {len(content)} chars, chapter_end_hook={chapter_end_hook[:50]!r}")
 
-            # ── V7.12: 最后一个场景完整性验证 + 结尾钩子拼接 ──
+            # ── V7.12b: 结尾钩子后处理 — 检查钩子是否在最后一个场景中，不在则追加 ──
             if _all_parts and chapter_end_hook:
                 _last_part = _all_parts[-1]
-                # 检查最后一个场景是否包含所有节拍关键词（宽松检查）
-                _last_beats = [l.strip("- ").strip() for l in _beats.strip().split("\n") if l.strip().startswith("-")]
-                _missing_beats = []
-                for _b in _last_beats:
-                    # 取节拍描述的前15个字作为关键词
-                    _kw = _b[:15] if len(_b) > 15 else _b
-                    if _kw not in _last_part and _kw[:8] not in _last_part:
-                        _missing_beats.append(_b[:30])
-                # 如果结尾钩子不在最后一个场景中，追加钩子段落
-                _hook_keywords = chapter_end_hook[:20] if chapter_end_hook else ""
-                if _hook_keywords and _hook_keywords not in _last_part:
-                    _hook_para = f"\n\n{chapter_end_hook[:200]}"
+                # 检查结尾钩子关键词是否出现在最后一个场景中
+                _hook_matched = False
+                # 用多个关键词片段做宽松匹配
+                for _kw_len in (30, 20, 15, 10):
+                    _kw = chapter_end_hook[:_kw_len]
+                    if _kw and _kw in _last_part:
+                        _hook_matched = True
+                        break
+                logger.info(f"[V7.12] Hook check: matched={_hook_matched}, hook_start={chapter_end_hook[:30]!r}, last_scene_chars={len(_last_part)}")
+                if not _hook_matched:
+                    # 提取钩子的核心动作描述，拼接为自然段落
+                    _hook_text = chapter_end_hook.strip()
+                    # 去掉可能的引导语前缀
+                    for _prefix in ("林默从坟场的噩梦惊醒后，", "林默从坟场的噩梦惊醒后,"):
+                        if _hook_text.startswith(_prefix):
+                            _hook_text = _hook_text[len(_prefix):]
+                            break
+                    _hook_para = f"\n\n{_hook_text[:300]}"
                     _all_parts[-1] = _last_part + _hook_para
                     content = "\n\n".join(_all_parts)
+                    logger.info(f"[V7.12] Hook appended ({len(_hook_para)}chars)")
+                # 检查最后一个场景的节拍完整性
+                _last_beats = [l.strip("- ").strip() for l in _beats.strip().split("\n") if l.strip().startswith("-")]
+                _missing = []
+                for _b in _last_beats:
+                    _kw = _b[:12] if len(_b) > 12 else _b
+                    if _kw and _kw not in _last_part and _kw[:6] not in _last_part:
+                        _missing.append(_b[:30])
+                if _missing:
+                    logger.warning(f"[V7.12] Last scene missing beats: {_missing}")
 
         # 后处理：超过目标120%则截断
         max_chars = int(target_words * 1.2)
