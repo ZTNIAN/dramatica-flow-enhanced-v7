@@ -938,3 +938,57 @@ WSL 某些情况下 `echo "hello"` 都没有输出，但命令实际执行成功
 ---
 
 *本文档由AI自动生成。下次迭代时，把本文件发给AI即可快速理解整个项目。*
+
+## 十九、V7.10 修复（云服务器镜像调试 2026-04-18）
+
+### 背景
+
+V7.9 实现了逐场景LLM调用，解决了"4个场景只写2个"的问题。但用户实测发现正文质量仍有3个严重问题：1）场景间出现大段重复内容（前场景尾部被后场景重新写了一遍）；2）细纲中标注的"双线并行"叙事手法在正文中完全丢失，场景3（数据碎片觉醒线）没有写出；3）细纲的"结尾钩子"没有注入正文收尾。本轮修复3个BUG。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 67 | `core/server/routers/ai_actions.py` | 场景间大段重复（如"维护部的灯光是惨白的..."出现两次） | `_prior_ctx` 取前场景尾部800字作为上下文，writer 看到后在新场景开头重写了一遍 | ① `_prior_ctx` 改为600字并加"不要重复"提示 ② 拼接时检测并移除重叠段落（滑动窗口比对） |
+| 68 | `core/server/routers/ai_actions.py` | 细纲中标注的叙事手法（如"双线并行"）在正文中丢失 | 逐场景调用时只传了 beats 描述，没有提取 narrative_technique/foreshadowing/ending_hook 等场景级字段 | 场景解析时提取这些字段，注入 `_scene_summary` 的【本场景要求】段落 |
+| 69 | `core/server/routers/ai_actions.py` | 细纲"结尾钩子"没有写入正文末尾 | `chapter_end_hook` 只在 blueprint 中传给单次调用模式，逐场景模式没有传 | 最后一个场景的 `_scene_summary` 追加【本章结尾钩子要求】段落 |
+
+### 关键发现
+
+> **逐场景调用的上下文传递需要更精细。** V7.9 只解决了"每个场景都有LLM调用"的架构问题，但没有解决"每个场景的 prompt 是否完整"的问题。场景级的叙事手法、伏笔、结尾钩子等元信息在解析时被丢弃了，writer 只看到了 beats 描述，丢失了所有叙事技法指令。
+
+### 已验证可工作
+
+⏳ 场景间去重（待用户端到端验证）
+⏳ 叙事手法注入（待用户端到端验证）
+⏳ 章末钩子注入（待用户端到端验证）
+
+### WSL 更新方式
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+url = 'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/core/server/routers/ai_actions.py'
+data = urllib.request.urlopen(url, timeout=30).read()
+with open('core/server/routers/ai_actions.py', 'wb') as f:
+    f.write(data)
+print(f'OK: {len(data)} bytes written')
+"
+# 重启 uvicorn
+```
+
+### 踩坑记录（新增）
+
+#### 坑58：逐场景调用 ≠ 逐场景传完整上下文
+V7.9 的逐场景调用只解决了"物理上每个场景都有独立LLM调用"的问题，但每次调用的 prompt 质量取决于传入的 `_scene_summary`。如果只传 beats 而丢弃叙事手法、伏笔、结尾钩子等元信息，writer 就不知道"怎么写"，只知道"写什么"。**规则**：逐场景调用时，场景级元信息（叙事手法、伏笔、结尾钩子）必须完整传递给 writer。
+
+#### 坑59：_prior_ctx 取太多反而导致重复
+取前场景尾部 800 字作为上下文，writer 看到后倾向于在新场景开头"衔接"，结果把尾部内容重写了一遍。**规则**：① 上下文截短到 600 字 ② 加明确提示"直接接续，不要重复" ③ 拼接时做去重检测。
+
+#### 坑60：结尾钩子必须注入最后一个场景
+`chapter_end_hook` 在单次调用模式下通过 blueprint 传入，但逐场景模式下 blueprint 对所有场景都一样，没有区分"最后一个场景需要收尾"。**规则**：逐场景模式下，结尾钩子只注入最后一个场景的 prompt，并明确要求"在本场景末尾自然地埋下这个钩子"。
+
+---
+
+*本文档由AI自动维护。下次迭代时，把本文件发给AI即可快速理解整个项目。*
