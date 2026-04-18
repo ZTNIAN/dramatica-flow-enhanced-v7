@@ -508,6 +508,9 @@ async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
             result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
             new_content = result.content
 
+        # Save to the SAME kind of file we read from, so frontend reload shows the change
+        if (s.chapter_dir / f"ch{req.chapter:04d}_final.md").exists():
+            s.save_final(req.chapter, new_content)
         s.save_draft(req.chapter, new_content)
         return {"ok": True, "rewritten": new_content, "changes": result.change_log}
     except HTTPException:
