@@ -752,18 +752,22 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
                     _part = _title_pat.sub('', _part, count=1).strip()
-                # V7.10: 场景间去重 - 移除与上一个场景尾部重叠的段落
-                if _all_parts:
+                # V7.11: 场景间去重 - 移除与上一个场景尾部重叠的段落（带安全保护）
+                if _all_parts and _part:
                     _prev = _all_parts[-1]
-                    _merged = False
+                    _orig_len = len(_part)
                     for _overlap in range(min(300, len(_prev)), 49, -10):
                         _tail = _prev[-_overlap:].strip()
                         if _tail and _tail in _part:
                             _cut = _part.index(_tail) + len(_tail)
-                            _part = _part[_cut:].strip()
-                            _merged = True
+                            _candidate = _part[_cut:].strip()
+                            # 安全保护：去重后长度不足原文30%则跳过，避免误杀整个场景
+                            if len(_candidate) >= _orig_len * 0.3:
+                                _part = _candidate
                             break
-                _all_parts.append(_part)
+                # 跳过空场景
+                if _part:
+                    _all_parts.append(_part)
                 _settlement = _result.settlement or _settlement
 
             content = "\n\n".join(_all_parts)
