@@ -613,28 +613,96 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         except Exception:
             pass
 
-    # ── 7. 调用 WriterAgent ──
+    # ── 7. 调用 WriterAgent（分两次调用，确保所有场景覆盖） ──
     from core.agents import WriterAgent
     chapter_max_tokens = min(8192, max(2048, int(target_words * 2.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
+    # ── 解析场景列表，用于分批 ──
+    _scenes_list = []  # [(header_str, beats_lines_str), ...]
+    _do_path = s.state_dir / "detailed_outlines" / f"ch{req.chapter:04d}.json"
+    if _do_path.exists():
+        try:
+            _do = json.loads(_do_path.read_text(encoding="utf-8"))
+            for _sc in _do.get("scenes", []):
+                _stitle = _sc.get("scene_title", _sc.get("title", ""))
+                _budget = _sc.get("word_budget", "")
+                _header = f"### {_stitle}" if _stitle else "### 场景"
+                if _budget:
+                    _header += f"（目标{_budget}字）"
+                _beats_parts = []
+                for _b in _sc.get("beats", []):
+                    if isinstance(_b, str):
+                        _beats_parts.append(f"- {_b}")
+                    elif isinstance(_b, dict):
+                        _beats_parts.append(f"- {_b.get('description', str(_b))}")
+                _scenes_list.append((_header, "\n".join(_beats_parts)))
+        except Exception:
+            pass
+
+    # 如果没有解析到分场景，降级为单次调用
+    if len(_scenes_list) <= 2:
+        _half_mode = False
+        _scene_summaries_1 = scene_summaries
+        _scene_summaries_2 = ""
+    else:
+        _half_mode = True
+        _mid = len(_scenes_list) // 2
+        _part1 = _scenes_list[:_mid]
+        _part2 = _scenes_list[_mid:]
+        _scene_summaries_1 = "\n".join(f"{h}\n{b}" for h, b in _part1)
+        _scene_summaries_2 = "\n".join(f"{h}\n{b}" for h, b in _part2)
+        _target_1 = sum(int(re.search(r'目标(\d+)字', h).group(1)) for h, _ in _part1 if re.search(r'目标(\d+)字', h))
+        _target_2 = target_words - _target_1 if _target_1 > 0 else target_words // 2
+
     try:
-        result = await run_sync(
+        # ── 第一次调用：前半场景 ──
+        result_1 = await run_sync(
             writer.write_chapter,
-            scene_summaries,       # str
-            blueprint,             # ArchitectBlueprint
-            protagonist,           # Character
-            world_context,         # str
-            req.chapter,           # int
-            target_words,          # int
+            _scene_summaries_1,      # str
+            blueprint,               # ArchitectBlueprint
+            protagonist,             # Character
+            world_context,           # str
+            req.chapter,             # int
+            _target_1 if _half_mode else target_words,  # int
             prior_summaries=prior_summaries,
             chapter_title=chapter_title,
             pending_hooks=pending_hooks,
             causal_chain=causal_chain,
             emotional_arcs=emotional_arcs,
         )
-        content = result.content
+        content_1 = result_1.content
+
+        # ── 第二次调用（仅分批模式）：后半场景 ──
+        if _half_mode and _scene_summaries_2:
+            # 把前半部分作为上下文传入
+            _prior_with_part1 = (prior_summaries + "\n\n" if prior_summaries else "") + f"### 本章前半部分内容（续写时保持连贯）\n{content_1[-1500:]}"
+            result_2 = await run_sync(
+                writer.write_chapter,
+                _scene_summaries_2,      # str
+                blueprint,               # ArchitectBlueprint
+                protagonist,             # Character
+                world_context,           # str
+                req.chapter,             # int
+                _target_2,               # int
+                prior_summaries=_prior_with_part1,
+                chapter_title=chapter_title,
+                pending_hooks=pending_hooks,
+                causal_chain=causal_chain,
+                emotional_arcs=emotional_arcs,
+            )
+            content_2 = result_2.content
+            # 拼接：去掉第二部分可能重复的章节标题
+            _title_pattern = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
+            content_2_clean = _title_pattern.sub('', content_2, count=1).strip()
+            content = content_1.strip() + "\n\n" + content_2_clean
+            # 合并结算表（取第二次的，或空）
+            settlement = result_2.settlement or result_1.settlement
+        else:
+            content = content_1
+            settlement = result_1.settlement
+
         # 后处理：超过目标120%则截断
         max_chars = int(target_words * 1.2)
         if len(content) > max_chars:
@@ -649,6 +717,6 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     content = content[:max_chars]
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
-                "settlement": dc_to_dict(result.settlement) if result.settlement else None}
+                "settlement": dc_to_dict(settlement) if settlement else None}
     except Exception as e:
         raise HTTPException(500, f"生成章节内容失败：{e}")
