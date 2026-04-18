@@ -722,25 +722,31 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _extra = _item[3] if len(_item) > 3 else ""
                 _scene_summary = f"{_header}\n{_beats}"
                 _scene_target = _budget if _budget > 0 else target_words // _scene_count
+                # V7.12: 节拍进度标记 — 告诉 LLM 本场景有几个节拍、已完成/未完成
+                _beat_lines = [l for l in _beats.strip().split("\n") if l.strip().startswith("-")]
+                _total_beats = len(_beat_lines)
                 # V7.11: 强制要求按节拍顺序写
-                _scene_summary += f"\n\n【强制要求】必须按以上节拍顺序逐一展开写成小说正文，不能跳过、合并或替换任何节拍。字数预算约{_scene_target}字，不能超{_scene_target*1.2:.0f}字。"
+                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成完整小说正文，不能跳过、合并或替换任何节拍。字数预算约{_scene_target}字，不能超{_scene_target*1.2:.0f}字。"
                 # V7.10: 注入叙事手法等额外信息
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
-                # V7.10: 最后一个场景注入章节结尾钩子
-                if _idx == _scene_count - 1 and chapter_end_hook:
-                    _scene_summary += f"\n\n【本章结尾钩子要求】{chapter_end_hook}"
-                    _scene_summary += "\n请在本场景末尾自然地埋下这个钩子，作为本章收尾。"
-                # 前面已写内容作为上下文（取最后600字，避免膨胀）
+                # V7.12: 不在场景 prompt 中注入结尾钩子，避免 LLM 急于到达钩子点而跳过节拍
+                # 钩子由后处理拼接到最后一个场景末尾
+                # 前面已写内容作为上下文（取最后400字，避免膨胀）
+                # V7.12: 最后一个场景不传 prior_ctx，把 token 空间留给节拍内容
                 _prior_ctx = ""
-                if _all_parts:
+                if _idx < _scene_count - 1 and _all_parts:
                     _written_so_far = "\n\n".join(_all_parts)
                     _prior_ctx = f"### 本章已写内容（续写时直接接续，不要重复以上内容）\n{_written_so_far[-400:]}"
-                else:
+                elif _idx == 0:
                     _prior_ctx = prior_summaries
+                # V7.12: 每个场景独立 max_tokens（而非全局 target×3.5）
+                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 2.5)))
+                _scene_llm = create_llm(max_tokens=_scene_max_tokens)
+                _scene_writer = WriterAgent(_scene_llm, style_guide=style_guide, genre=genre)
 
                 _result = await run_sync(
-                    writer.write_chapter,
+                    _scene_writer.write_chapter,
                     _scene_summary,       # 只传这一个场景
                     blueprint, protagonist, world_context,
                     req.chapter, _scene_target,
@@ -776,13 +782,31 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             if len(_candidate) >= _orig_len * 0.3:
                                 _part = _candidate
                             break
-                # 跳过空场景
-                if _part:
+                # 跳过空场景（不足50字视为无效）
+                if _part and len(_part) > 50:
                     _all_parts.append(_part)
                 _settlement = _result.settlement or _settlement
 
             content = "\n\n".join(_all_parts)
             settlement = _settlement
+
+            # ── V7.12: 最后一个场景完整性验证 + 结尾钩子拼接 ──
+            if _all_parts and chapter_end_hook:
+                _last_part = _all_parts[-1]
+                # 检查最后一个场景是否包含所有节拍关键词（宽松检查）
+                _last_beats = [l.strip("- ").strip() for l in _beats.strip().split("\n") if l.strip().startswith("-")]
+                _missing_beats = []
+                for _b in _last_beats:
+                    # 取节拍描述的前15个字作为关键词
+                    _kw = _b[:15] if len(_b) > 15 else _b
+                    if _kw not in _last_part and _kw[:8] not in _last_part:
+                        _missing_beats.append(_b[:30])
+                # 如果结尾钩子不在最后一个场景中，追加钩子段落
+                _hook_keywords = chapter_end_hook[:20] if chapter_end_hook else ""
+                if _hook_keywords and _hook_keywords not in _last_part:
+                    _hook_para = f"\n\n{chapter_end_hook[:200]}"
+                    _all_parts[-1] = _last_part + _hook_para
+                    content = "\n\n".join(_all_parts)
 
         # 后处理：超过目标120%则截断
         max_chars = int(target_words * 1.2)
