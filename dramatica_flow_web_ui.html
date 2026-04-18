@@ -3347,20 +3347,9 @@ async function applyIssueFix(idx) {
       body: JSON.stringify({ chapter: ch, original_text: original || fullText.substring(0, 500), instruction, context_before: before, context_after: after }),
     });
     if (!res.ok) { toast('修复失败', false); return; }
-    toast('修复完成，请检查正文', true);
-    // 如果能定位 excerpt，直接替换
-    if (original) {
-      const chRes2 = await api(`/books/${currentBook.id}/chapters/${ch}`);
-      const newText = chRes2.content.replace(original, res.rewritten);
-      if (newText !== chRes2.content) {
-        await api(`/books/${currentBook.id}/chapters/${ch}/content`, {
-          method: 'PUT', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ content: newText, kind: chRes2.kind }),
-        });
-        toast('修复已自动应用到正文', true);
-        await loadBookData();
-      }
-    }
+    toast('修复已应用到草稿，请检查正文', true);
+    // Refresh chapter display to show the revised content
+    await loadBookData();
   } catch (e) { toast('修复失败: ' + e.message, false); }
 }
 
