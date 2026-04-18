@@ -40,9 +40,30 @@ async def ai_generate_setup(book_id: str, req: AiGenerateSetupReq):
 风格：{req.style}
 返回纯 JSON，不要 markdown 代码块。"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         setup_dir = s.book_dir / "setup"
         setup_dir.mkdir(parents=True, exist_ok=True)
         if "characters" in data:
@@ -90,9 +111,30 @@ async def extract_from_novel(book_id: str, req: ExtractFromNovelReq):
 
 返回纯 JSON。"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         return {"ok": True, "extracted": data}
     except Exception as e:
         raise HTTPException(500, f"提取失败：{e}")
@@ -121,9 +163,30 @@ async def extract_story_state(book_id: str, req: ExtractStoryStateReq):
 
 返回纯 JSON。"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         return {"ok": True, "state": data}
     except Exception as e:
         raise HTTPException(500, f"提取故事状态失败：{e}")
@@ -213,9 +276,30 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 
 返回 JSON：{{"sequences": [...]}}"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         if "sequences" in data:
             from ..deps import normalize_outline
             data = normalize_outline(data, s)
@@ -304,9 +388,30 @@ async def ai_generate_chapter_outlines(book_id: str):
 
 返回 JSON 数组。"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         outlines = data if isinstance(data, list) else data.get("outlines", data.get("chapters", []))
         co_path = s.state_dir / "chapter_outlines.json"
         co_path.write_text(json.dumps(outlines, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -327,8 +432,6 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
     except Exception:
         genre = "玄幻"
         target_words = 2000
-    llm = create_llm()
-    from core.llm import LLMMessage
     # 读取故事大纲和本章章纲作为上下文
     outline_ctx = ""
     outline_path = s.state_dir / "outline.json"
@@ -336,7 +439,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
             seqs = outline_data.get("sequences", [])
-            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:2000]}"
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:600]}"
         except Exception:
             pass
 
@@ -347,7 +450,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             all_cos = json.loads(co_path.read_text(encoding="utf-8"))
             for co in all_cos:
                 if co.get("chapter_number") == req.chapter:
-                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:1500]}"
+                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:400]}"
                     break
         except Exception:
             pass
@@ -360,7 +463,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             wp = s.book_dir / "setup" / wf  # fallback 到 setup/
         if wp.exists():
             try:
-                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:400]}"
             except Exception:
                 pass
 
@@ -385,9 +488,30 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 
 返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "weight": 5, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
     try:
-        resp = await run_sync(llm.complete, [LLMMessage(role="user", content=prompt)])
+        _llm = create_llm(max_tokens=4096)
+        resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
-        data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), flags=_re.MULTILINE).replace("```", "").strip())
+        _raw = resp.content.strip()
+        _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
+        _raw = _raw.replace("```", "").strip()
+        _first = _raw.find("{")
+        _last = _raw.rfind("}")
+        if _first >= 0 and _last > _first:
+            _raw = _raw[_first:_last+1]
+        _raw = _raw.rstrip(", \n")
+        try:
+            data = _json.loads(_raw)
+        except _json.JSONDecodeError:
+            _open_b = _raw.count("{")
+            _close_b = _raw.count("}")
+            _open_s = _raw.count("[")
+            _close_s = _raw.count("]")
+            _patched = _raw
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            if _close_b < _open_b:
+                _patched += "}" * (_open_b - _close_b)
+            data = _json.loads(_patched)
         data["chapter"] = req.chapter
 
         # ── 场景字数归一化：按 weight 比例分配 target_words ──
