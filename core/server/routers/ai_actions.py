@@ -54,6 +54,14 @@ async def ai_generate_setup(book_id: str, req: AiGenerateSetupReq):
         if "events" in data:
             evts = {"events": data["events"]}
             (setup_dir / "events.json").write_text(json.dumps(evts, ensure_ascii=False, indent=2), encoding="utf-8")
+        # ── 同步复制到 state/ 目录，供下游环节读取 ──
+        import shutil as _shutil
+        state_dir = s.state_dir
+        state_dir.mkdir(parents=True, exist_ok=True)
+        for _fname in ("characters.json", "world.json", "events.json"):
+            _src = setup_dir / _fname
+            if _src.exists():
+                _shutil.copy2(_src, state_dir / _fname)
         return {"ok": True, "data": data}
     except Exception as e:
         raise HTTPException(500, f"AI 生成设定失败：{e}")
@@ -170,6 +178,18 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
     except Exception:
         genre, title, target_ch = "玄幻", "", 90
 
+    # ── 读取世界观设定（环节二生成的）──
+    world_ctx = ""
+    for _fname in ("characters.json", "world.json", "events.json"):
+        _fp = s.state_dir / _fname
+        if not _fp.exists():
+            _fp = s.book_dir / "setup" / _fname  # fallback 到 setup/
+        if _fp.exists():
+            try:
+                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:800]}"
+            except Exception:
+                pass
+
     llm = create_llm()
     from core.llm import LLMMessage
     idea_text = f"用户想法：{req.idea}\n" if req.idea else ""
@@ -179,6 +199,8 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 书名：{title}
 目标章数：{target_ch}
 {idea_text}
+{f'''世界观设定（必须严格使用以下角色、地点和事件，不能自己另编）：
+{world_ctx}''' if world_ctx else ''}
 
 请生成包含 6-10 个序列（sequence）的大纲，每个序列包含：
 - id: 序列标识
@@ -252,11 +274,25 @@ async def ai_generate_chapter_outlines(book_id: str):
     except Exception:
         target_words_ch = 2000
 
+    # ── 读取世界观设定 ──
+    world_ctx = ""
+    for _fname in ("characters.json", "world.json"):
+        _fp = s.state_dir / _fname
+        if not _fp.exists():
+            _fp = s.book_dir / "setup" / _fname
+        if _fp.exists():
+            try:
+                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:800]}"
+            except Exception:
+                pass
+
     llm = create_llm()
     from core.llm import LLMMessage
     prompt = f"""根据以下故事大纲，生成详细的章纲。
 
 大纲：{json.dumps(outline, ensure_ascii=False)[:4000]}
+{f'''世界观设定（角色和地点必须使用以下已定义的，不能另编）：
+{world_ctx}''' if world_ctx else ''}
 
 每个章纲包含：
 - chapter_number: 章号
@@ -320,6 +356,8 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
     world_ctx = ""
     for wf in ("world.json", "characters.json"):
         wp = s.state_dir / wf
+        if not wp.exists():
+            wp = s.book_dir / "setup" / wf  # fallback 到 setup/
         if wp.exists():
             try:
                 world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
@@ -476,6 +514,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
     world_ctx_parts = []
     for fname in ("world.json", "characters.json"):
         fp = s.state_dir / fname
+        if not fp.exists():
+            fp = s.book_dir / "setup" / fname  # fallback 到 setup/
         if fp.exists():
             try:
                 world_ctx_parts.append(f"## {fname}\n{fp.read_text(encoding='utf-8')[:1200]}")
@@ -487,6 +527,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
     from core.types.narrative import Character, CharacterNeed, CharacterWorldview, Obstacle
     protagonist = None
     char_path = s.state_dir / "characters.json"
+    if not char_path.exists():
+        char_path = s.book_dir / "setup" / "characters.json"  # fallback 到 setup/
     if char_path.exists():
         try:
             chars_data = json.loads(char_path.read_text(encoding="utf-8"))
