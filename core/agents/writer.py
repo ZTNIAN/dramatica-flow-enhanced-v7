@@ -277,6 +277,41 @@ class WriterAgent:
             parts = resp.content.split(SETTLEMENT_SEPARATOR, 1)
             content = parts[0].strip()
 
+            # 后处理：剥离 LLM 可能混入的蓝图/元信息段落
+            import re as _re
+            # 匹配 "## 写前蓝图" 到下一个 "## " 或 "键盘声" 等正文开头的模式
+            _blueprint_pattern = _re.compile(
+                r'(?:^|\n)#{1,3}\s*写前蓝图[\s\S]*?(?=\n#{1,3}\s|\n键盘|\n【|\n　|\n[A-Z\u4e00-\u9fff]{2,})',
+                _re.MULTILINE
+            )
+            content = _blueprint_pattern.sub('', content).strip()
+            # 备用：如果蓝图没有标题但以 "核心冲突：" 开头（紧跟在章标题后）
+            if '核心冲突' in content[:500] and '情感旅程' in content[:500]:
+                _lines = content.split('\n')
+                _cut = 0
+                for _i, _l in enumerate(_lines):
+                    _lstrip = _l.strip()
+                    if _lstrip.startswith('**核心冲突') or _lstrip.startswith('* **核心冲突'):
+                        # 往前找章标题
+                        _start = _i
+                        for _j in range(_i-1, max(_i-5, -1), -1):
+                            if _lines[_j].strip().startswith('#') or not _lines[_j].strip():
+                                _start = _j
+                                break
+                        # 往后找结束：空行后跟正文内容
+                        _end = _i
+                        for _j in range(_i+1, min(_i+30, len(_lines))):
+                            if _lines[_j].strip() == '' and _j > _i + 3:
+                                _end = _j + 1
+                                break
+                            if any(kw in _lines[_j] for kw in ['键盘声', '屏幕', '他', '她', '门', '走廊']):
+                                _end = _j
+                                break
+                        _cut = _end
+                        break
+                if _cut > 0:
+                    content = '\n'.join(_lines[_cut:]).strip()
+
             settlement = PostWriteSettlement()
             if len(parts) > 1:
                 try:
