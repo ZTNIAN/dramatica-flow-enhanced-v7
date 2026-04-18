@@ -721,6 +721,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _header, _beats, _budget = _item[0], _item[1], _item[2]
                 _extra = _item[3] if len(_item) > 3 else ""
                 _scene_summary = f"{_header}\n{_beats}"
+                # V7.11: 强制要求按节拍顺序写
+                _scene_summary += f"\n\n【强制要求】必须按以上节拍顺序逐一展开写成小说正文，不能跳过、合并或替换任何节拍。字数预算约{_scene_target}字，不能超{_scene_target*1.2:.0f}字。"
                 # V7.10: 注入叙事手法等额外信息
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
@@ -748,6 +750,15 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     emotional_arcs=emotional_arcs,
                 )
                 _part = _result.content.strip()
+                # ── 场景级字数截断：超过 budget×1.2 强制截断 ──
+                if _scene_target > 0:
+                    _max_scene_chars = int(_scene_target * 1.2)
+                    if len(_part) > _max_scene_chars:
+                        _cut = _part.rfind("。", int(_scene_target * 0.8), _max_scene_chars + 100)
+                        if _cut > int(_scene_target * 0.8):
+                            _part = _part[:_cut+1]
+                        else:
+                            _part = _part[:_max_scene_chars]
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
