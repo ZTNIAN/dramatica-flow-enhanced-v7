@@ -583,7 +583,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         try:
             do = json.loads(do_path.read_text(encoding="utf-8"))
             hooks_to_plant = do.get("hooks_to_plant", [])
-            chapter_end_hook = do.get("chapter_end_hook", "") or do.get("结尾钩子", "") or do.get("ending_hook", "")
+            chapter_end_hook = do.get("chapter_end_hook", "")
             ea = do.get("emotional_arc", {})
             if ea:
                 emotional_journey = {"start": ea.get("start", "平静"), "end": ea.get("end", "紧张")}
@@ -698,9 +698,37 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         except Exception:
             pass
 
+    # V7.13: 如果JSON解析没有得到场景，从scene_summaries字符串提取
+    if not _scenes_list:
+        _segs = re.split(r'(?=^###\s+)', scene_summaries, flags=re.MULTILINE)
+        for _seg in _segs:
+            _seg = _seg.strip()
+            if not _seg.startswith("###"):
+                continue
+            _m2 = re.match(r'^###\s+(.+?)(?:（目标(\d+)字）)?', _seg)
+            if _m2:
+                _t = _m2.group(1)
+                _b = _m2.group(2) or ""
+                _bi = int(_b) if _b else 0
+                _bl = "\n".join(l for l in _seg.split("\n")[1:] if l.strip())
+                _scenes_list.append((f"### {_t}", _bl, _bi, ""))
+
+    logging.info(f"[V7.13] Scenes: {len(_scenes_list)}")
+
+    # V7.13: 提取结尾钩子（多字段名兼容）
+    _hook_text = ""
+    if _do_path.exists():
+        try:
+            _dh = json.loads(_do_path.read_text(encoding="utf-8"))
+            _hook_text = _dh.get("chapter_end_hook", "") or _dh.get("\u7ed3\u5c3e\u94a9\u5b50", "") or _dh.get("ending_hook", "")
+        except Exception:
+            pass
+    if not _hook_text:
+        _hook_text = chapter_end_hook
+
     try:
-        # 如果没有解析到分场景（<=2个），降级为单次调用
-        if len(_scenes_list) <= 2:
+        # 如果没有场景信息，降级为单次调用
+        if not _scenes_list:
             result = await run_sync(
                 writer.write_chapter,
                 scene_summaries, blueprint, protagonist, world_context,
@@ -722,25 +750,20 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _extra = _item[3] if len(_item) > 3 else ""
                 _scene_summary = f"{_header}\n{_beats}"
                 _scene_target = _budget if _budget > 0 else target_words // _scene_count
-                # V7.12: 节拍进度标记 — 告诉 LLM 本场景有几个节拍、已完成/未完成
                 _beat_lines = [l for l in _beats.strip().split("\n") if l.strip().startswith("-")]
                 _total_beats = len(_beat_lines)
-                # V7.11: 强制要求按节拍顺序写
-                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成完整小说正文，不能跳过、合并或替换任何节拍。字数预算约{_scene_target}字，不能超{_scene_target*1.2:.0f}字。"
-                # V7.10: 注入叙事手法等额外信息
+                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。字数约{_scene_target}字，不超过{_scene_target*1.2:.0f}字。"
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
-                # V7.12: 不在场景 prompt 中注入结尾钩子，避免 LLM 急于到达钩子点而跳过节拍
-                # 钩子由后处理拼接到最后一个场景末尾
-                # 前面已写内容作为上下文（取最后400字，避免膨胀）
-                # V7.12: 最后一个场景不传 prior_ctx，把 token 空间留给节拍内容
+                # 不注入钩子到prompt，由后处理拼接
+                # 最后一个场景不传prior_ctx，留给节拍内容
                 _prior_ctx = ""
                 if _idx < _scene_count - 1 and _all_parts:
                     _written_so_far = "\n\n".join(_all_parts)
                     _prior_ctx = f"### 本章已写内容（续写时直接接续，不要重复以上内容）\n{_written_so_far[-400:]}"
                 elif _idx == 0:
                     _prior_ctx = prior_summaries
-                # V7.12: 每个场景独立 max_tokens（而非全局 target×3.5）
+
                 _scene_max_tokens = min(8192, max(2048, int(_scene_target * 2.5)))
                 _scene_llm = create_llm(max_tokens=_scene_max_tokens)
                 _scene_writer = WriterAgent(_scene_llm, style_guide=style_guide, genre=genre)
@@ -759,18 +782,12 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 # ── 场景级字数截断：超过 budget×1.2 强制截断 ──
                 if _scene_target > 0:
                     _max_scene_chars = int(_scene_target * 1.2)
-                    _raw_len = len(_part)
-                    if _raw_len > _max_scene_chars:
+                    if len(_part) > _max_scene_chars:
                         _cut = _part.rfind("。", int(_scene_target * 0.8), _max_scene_chars + 100)
                         if _cut > int(_scene_target * 0.8):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
-                        logging.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars -> {len(_part)}chars (target={_scene_target}, max={_max_scene_chars})")
-                    else:
-                        logging.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars (target={_scene_target}, max={_max_scene_chars}, NO TRUNCATE)")
-                else:
-                    logging.info(f"[V7.12] Scene{_idx+1}: _scene_target={_scene_target}, SKIPPING truncation")
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
@@ -788,50 +805,16 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             if len(_candidate) >= _orig_len * 0.3:
                                 _part = _candidate
                             break
-                # 跳过空场景（不足50字视为无效）
+                # 跳过空场景
                 if _part and len(_part) > 50:
                     _all_parts.append(_part)
                 _settlement = _result.settlement or _settlement
 
             content = "\n\n".join(_all_parts)
             settlement = _settlement
-            logging.info(f"[V7.12] Per-scene done: {_scene_count} scenes, total {len(content)} chars, chapter_end_hook={chapter_end_hook[:50]!r}")
 
-            # ── V7.12b: 结尾钩子后处理 — 检查钩子是否在最后一个场景中，不在则追加 ──
-            if _all_parts and chapter_end_hook:
-                _last_part = _all_parts[-1]
-                # 检查结尾钩子关键词是否出现在最后一个场景中
-                _hook_matched = False
-                # 用多个关键词片段做宽松匹配
-                for _kw_len in (30, 20, 15, 10):
-                    _kw = chapter_end_hook[:_kw_len]
-                    if _kw and _kw in _last_part:
-                        _hook_matched = True
-                        break
-                logging.info(f"[V7.12] Hook check: matched={_hook_matched}, hook_start={chapter_end_hook[:30]!r}, last_scene_chars={len(_last_part)}")
-                if not _hook_matched:
-                    # 提取钩子的核心动作描述，拼接为自然段落
-                    _hook_text = chapter_end_hook.strip()
-                    # 去掉可能的引导语前缀
-                    for _prefix in ("林默从坟场的噩梦惊醒后，", "林默从坟场的噩梦惊醒后,"):
-                        if _hook_text.startswith(_prefix):
-                            _hook_text = _hook_text[len(_prefix):]
-                            break
-                    _hook_para = f"\n\n{_hook_text[:300]}"
-                    _all_parts[-1] = _last_part + _hook_para
-                    content = "\n\n".join(_all_parts)
-                    logging.info(f"[V7.12] Hook appended ({len(_hook_para)}chars)")
-                # 检查最后一个场景的节拍完整性
-                _last_beats = [l.strip("- ").strip() for l in _beats.strip().split("\n") if l.strip().startswith("-")]
-                _missing = []
-                for _b in _last_beats:
-                    _kw = _b[:12] if len(_b) > 12 else _b
-                    if _kw and _kw not in _last_part and _kw[:6] not in _last_part:
-                        _missing.append(_b[:30])
-                if _missing:
-                    logging.warning(f"[V7.12] Last scene missing beats: {_missing}")
-
-        # 后处理：超过目标120%则截断
+        # ═══ 全局后处理 ═══
+        # 1. 字数截断
         max_chars = int(target_words * 1.2)
         if len(content) > max_chars:
             cut_pos = content.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
@@ -843,6 +826,20 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     content = content[:cut_pos+1]
                 else:
                     content = content[:max_chars]
+        # 2. 结尾钩子后处理
+        if _hook_text:
+            _found = False
+            for _kl in (30, 20, 15, 10):
+                if _hook_text[:_kl] and _hook_text[:_kl] in content[-500:]:
+                    _found = True
+                    break
+            if not _found:
+                _hp = _hook_text.strip()
+                for _px in ("林默从坟场的噩梦惊醒后，", "林默从坟场的噩梦惊醒后,"):
+                    if _hp.startswith(_px):
+                        _hp = _hp[len(_px):]
+                        break
+                content = content.rstrip() + "\n\n" + _hp[:300]
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(settlement) if settlement else None}
