@@ -13,6 +13,7 @@ from ..types.narrative import Character
 from ..narrative import ChapterOutlineSchema
 
 from .kb import KB_ANTI_AI, KB_REDLINES, track_kb_query
+from .auditor import _MODE_INSTRUCTIONS, CHANGELOG_SEPARATOR
 
 _KB_ANTI_AI = KB_ANTI_AI
 _KB_REDLINES = KB_REDLINES
