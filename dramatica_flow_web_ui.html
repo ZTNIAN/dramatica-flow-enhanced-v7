@@ -3358,9 +3358,8 @@ async function doRevise() {
   if (!ch) return toast('请选择章节', false);
   toast('正在自动修订...', 'loading');
   try {
-    const res = await api(`/action/revise`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ book_id: currentBook.id, chapter: ch, mode: 'spot-fix' }),
+    const res = await api(`/action/revise?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&mode=spot-fix`, {
+      method: 'POST',
     });
     toast(res.ok ? '修订完成' : '修订失败', res.ok);
     if (!res.ok && res.stderr) toast(res.stderr, false);
