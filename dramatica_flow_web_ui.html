@@ -920,12 +920,15 @@ async function aiGenerateSetup() {
 }
 
 function renderAICharsPreview(chars) {
-  return chars.map(c => `
+  return chars.map(c => {
+    const pers = Array.isArray(c.personality) ? c.personality.join('、') : (typeof c.personality === 'string' ? c.personality : '-');
+    return `
     <div class="form-item-card">
       <div style="font-size:13px;font-weight:600">${esc(c.name)} <span style="font-size:11px;color:var(--text3);font-weight:400">${esc(c.role||'')}</span></div>
-      <div style="font-size:12px;color:var(--text2);margin-top:4px">目标：${esc(c.need?.external||'-')} / 渴望：${esc(c.need?.internal||'-')}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">性格：${(c.personality||[]).map(p=>esc(p)).join('、')}</div>
-    </div>`).join('');
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">性格：${esc(pers)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc((c.goals||'').slice(0,80) || (c.backstory||'').slice(0,80) || '')}</div>
+    </div>`;
+  }).join('');
 }
 
 function showAIWorldPreview(world) {
@@ -943,9 +946,9 @@ function showAIWorldPreview(world) {
 function showAIEventsPreview(events) {
   return events.map(e => `
     <div class="form-item-card">
-      <div style="font-size:13px;font-weight:600">${esc(e.name)} <span class="badge badge-inciting" style="margin-left:6px">第${e.suggested_act||'?'}幕</span></div>
-      <div style="font-size:12px;color:var(--text2);margin-top:4px">${esc(e.description)}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">功能：${esc(e.suggested_function||'-')} · 涉及：${(e.characters_involved||[]).join(', ')}</div>
+      <div style="font-size:13px;font-weight:600">${esc(e.name||e.id||'事件')} <span class="badge badge-inciting" style="margin-left:6px">${esc(e.chapter_hint||'')}</span></div>
+      <div style="font-size:12px;color:var(--text2);margin-top:4px">${esc(e.description||'')}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(e.impact||e.suggested_function||'')}</div>
     </div>`).join('');
 }
 
@@ -955,7 +958,7 @@ function showAIPreview(tab, el) {
   const data = window._aiResult || {};
   const cont = document.getElementById('ai-preview-content');
   if (tab === 'chars') cont.innerHTML = renderAICharsPreview(data.characters || []);
-  else if (tab === 'world') cont.innerHTML = showAIWorldPreview(data.world || {});
+  else if (tab === 'world') cont.innerHTML = showAIWorldPreview(data.world || {locations: data.locations || []});
   else cont.innerHTML = showAIEventsPreview(data.events || []);
 }
 
@@ -969,9 +972,10 @@ async function saveAIResult() {
       body: JSON.stringify({ file_type: 'characters', content: JSON.stringify({ characters: r.characters }, null, 2) }),
     });
     // world.json 已是 {locations:[],factions:[],rules:[]} 格式，但需加 world_rules key
+    const worldData = r.world || { locations: r.locations || [], power_system: r.power_system || '' };
     await api(`/books/${currentBook.id}/setup/world`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ file_type: 'world', content: JSON.stringify(r.world, null, 2) }),
+      body: JSON.stringify({ file_type: 'world', content: JSON.stringify(worldData, null, 2) }),
     });
     // events.json → {"events":[...]}
     await api(`/books/${currentBook.id}/setup/events`, {
@@ -1393,9 +1397,10 @@ async function saveExtractResult() {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ file_type: 'characters', content: JSON.stringify({ characters: r.characters }, null, 2) }),
     });
+    const worldData = r.world || { locations: r.locations || [], power_system: r.power_system || '' };
     await api(`/books/${currentBook.id}/setup/world`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ file_type: 'world', content: JSON.stringify(r.world, null, 2) }),
+      body: JSON.stringify({ file_type: 'world', content: JSON.stringify(worldData, null, 2) }),
     });
     await api(`/books/${currentBook.id}/setup/events`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
