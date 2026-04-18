@@ -766,11 +766,11 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
-                        logger.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars -> {len(_part)}chars (target={_scene_target}, max={_max_scene_chars})")
+                        logging.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars -> {len(_part)}chars (target={_scene_target}, max={_max_scene_chars})")
                     else:
-                        logger.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars (target={_scene_target}, max={_max_scene_chars}, NO TRUNCATE)")
+                        logging.info(f"[V7.12] Scene{_idx+1}: {_raw_len}chars (target={_scene_target}, max={_max_scene_chars}, NO TRUNCATE)")
                 else:
-                    logger.info(f"[V7.12] Scene{_idx+1}: _scene_target={_scene_target}, SKIPPING truncation")
+                    logging.info(f"[V7.12] Scene{_idx+1}: _scene_target={_scene_target}, SKIPPING truncation")
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
@@ -795,7 +795,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
             content = "\n\n".join(_all_parts)
             settlement = _settlement
-            logger.info(f"[V7.12] Per-scene done: {_scene_count} scenes, total {len(content)} chars, chapter_end_hook={chapter_end_hook[:50]!r}")
+            logging.info(f"[V7.12] Per-scene done: {_scene_count} scenes, total {len(content)} chars, chapter_end_hook={chapter_end_hook[:50]!r}")
 
             # ── V7.12b: 结尾钩子后处理 — 检查钩子是否在最后一个场景中，不在则追加 ──
             if _all_parts and chapter_end_hook:
@@ -808,7 +808,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     if _kw and _kw in _last_part:
                         _hook_matched = True
                         break
-                logger.info(f"[V7.12] Hook check: matched={_hook_matched}, hook_start={chapter_end_hook[:30]!r}, last_scene_chars={len(_last_part)}")
+                logging.info(f"[V7.12] Hook check: matched={_hook_matched}, hook_start={chapter_end_hook[:30]!r}, last_scene_chars={len(_last_part)}")
                 if not _hook_matched:
                     # 提取钩子的核心动作描述，拼接为自然段落
                     _hook_text = chapter_end_hook.strip()
@@ -820,7 +820,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     _hook_para = f"\n\n{_hook_text[:300]}"
                     _all_parts[-1] = _last_part + _hook_para
                     content = "\n\n".join(_all_parts)
-                    logger.info(f"[V7.12] Hook appended ({len(_hook_para)}chars)")
+                    logging.info(f"[V7.12] Hook appended ({len(_hook_para)}chars)")
                 # 检查最后一个场景的节拍完整性
                 _last_beats = [l.strip("- ").strip() for l in _beats.strip().split("\n") if l.strip().startswith("-")]
                 _missing = []
@@ -829,7 +829,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     if _kw and _kw not in _last_part and _kw[:6] not in _last_part:
                         _missing.append(_b[:30])
                 if _missing:
-                    logger.warning(f"[V7.12] Last scene missing beats: {_missing}")
+                    logging.warning(f"[V7.12] Last scene missing beats: {_missing}")
 
         # 后处理：超过目标120%则截断
         max_chars = int(target_words * 1.2)
