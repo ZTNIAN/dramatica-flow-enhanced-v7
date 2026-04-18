@@ -374,8 +374,28 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
         report = await run_sync(auditor.audit_chapter, content, chapter, blueprint, truth_ctx, settlement,
                                  cross_thread_context="")
         result = await run_sync(reviser.revise, content, report.issues, mode)
-        s.save_draft(chapter, result.content)
-        s.save_final(chapter, result.content)
+        # 字数控制
+        try:
+            cfg = s.read_config()
+            target_words = cfg.get("target_words_per_chapter", 2000)
+        except Exception:
+            target_words = 2000
+        max_chars = int(target_words * 1.2)
+        revised = result.content
+        if len(revised) > max_chars:
+            cut_pos = revised.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
+            if cut_pos > int(target_words * 0.8):
+                revised = revised[:cut_pos]
+            else:
+                cut_pos = revised.rfind("。", int(target_words * 0.8), max_chars + 100)
+                if cut_pos > int(target_words * 0.8):
+                    revised = revised[:cut_pos+1]
+                else:
+                    revised = revised[:max_chars]
+        s.save_draft(chapter, revised)
+        final_path = s.chapter_dir / f"ch{chapter:04d}_final.md"
+        if final_path.exists():
+            final_path.unlink()
         return {"ok": True, "changes": result.change_log, "issues_count": len(report.issues)}
     except Exception as e:
         raise HTTPException(500, f"修订失败：{e}")
@@ -438,8 +458,29 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
 
         try:
             result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
-            s.save_draft(chapter, result.content)
-            s.save_final(chapter, result.content)
+            # 字数控制
+            try:
+                cfg = s.read_config()
+                target_words = cfg.get("target_words_per_chapter", 2000)
+            except Exception:
+                target_words = 2000
+            max_chars = int(target_words * 1.2)
+            revised = result.content
+            if len(revised) > max_chars:
+                cut_pos = revised.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
+                if cut_pos > int(target_words * 0.8):
+                    revised = revised[:cut_pos]
+                else:
+                    cut_pos = revised.rfind("。", int(target_words * 0.8), max_chars + 100)
+                    if cut_pos > int(target_words * 0.8):
+                        revised = revised[:cut_pos+1]
+                    else:
+                        revised = revised[:max_chars]
+            s.save_draft(chapter, revised)
+            # 每轮修订后删掉 final，最后一轮结果需要用户手动确认
+            final_path = s.chapter_dir / f"ch{chapter:04d}_final.md"
+            if final_path.exists():
+                final_path.unlink()
             rounds_log[-1]["changes"] = result.change_log
         except Exception as e:
             rounds_log[-1]["error"] = f"修订失败: {e}"
@@ -508,10 +549,30 @@ async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
             result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
             new_content = result.content
 
-        # Save to the SAME kind of file we read from, so frontend reload shows the change
-        if (s.chapter_dir / f"ch{req.chapter:04d}_final.md").exists():
-            s.save_final(req.chapter, new_content)
+        # 后处理：字数控制，不超过目标120%
+        try:
+            cfg = s.read_config()
+            target_words = cfg.get("target_words_per_chapter", 2000)
+        except Exception:
+            target_words = 2000
+        max_chars = int(target_words * 1.2)
+        if len(new_content) > max_chars:
+            cut_pos = new_content.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
+            if cut_pos > int(target_words * 0.8):
+                new_content = new_content[:cut_pos]
+            else:
+                cut_pos = new_content.rfind("。", int(target_words * 0.8), max_chars + 100)
+                if cut_pos > int(target_words * 0.8):
+                    new_content = new_content[:cut_pos+1]
+                else:
+                    new_content = new_content[:max_chars]
+
+        # Only save to draft — user must manually re-promote to final via "确认最终稿"
         s.save_draft(req.chapter, new_content)
+        # Remove stale final so frontend falls back to showing the revised draft
+        final_path = s.chapter_dir / f"ch{req.chapter:04d}_final.md"
+        if final_path.exists():
+            final_path.unlink()
         return {"ok": True, "rewritten": new_content, "changes": result.change_log}
     except HTTPException:
         raise
