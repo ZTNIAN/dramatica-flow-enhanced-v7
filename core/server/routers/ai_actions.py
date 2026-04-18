@@ -721,6 +721,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _header, _beats, _budget = _item[0], _item[1], _item[2]
                 _extra = _item[3] if len(_item) > 3 else ""
                 _scene_summary = f"{_header}\n{_beats}"
+                _scene_target = _budget if _budget > 0 else target_words // _scene_count
                 # V7.11: 强制要求按节拍顺序写
                 _scene_summary += f"\n\n【强制要求】必须按以上节拍顺序逐一展开写成小说正文，不能跳过、合并或替换任何节拍。字数预算约{_scene_target}字，不能超{_scene_target*1.2:.0f}字。"
                 # V7.10: 注入叙事手法等额外信息
@@ -730,7 +731,6 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 if _idx == _scene_count - 1 and chapter_end_hook:
                     _scene_summary += f"\n\n【本章结尾钩子要求】{chapter_end_hook}"
                     _scene_summary += "\n请在本场景末尾自然地埋下这个钩子，作为本章收尾。"
-                _scene_target = _budget if _budget > 0 else target_words // _scene_count
                 # 前面已写内容作为上下文（取最后600字，避免膨胀）
                 _prior_ctx = ""
                 if _all_parts:
