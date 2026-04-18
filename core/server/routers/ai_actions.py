@@ -431,6 +431,12 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             scenes = do.get("scenes", [])
             parts = []
             for sc in scenes:
+                stitle = sc.get("scene_title", sc.get("title", ""))
+                budget = sc.get("word_budget", "")
+                header = f"### {stitle}" if stitle else "### 场景"
+                if budget:
+                    header += f"（目标{budget}字）"
+                parts.append(header)
                 beats = sc.get("beats", [])
                 for b in beats:
                     if isinstance(b, str):
