@@ -402,7 +402,7 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
 
 
 @router.post("/{book_id}/auto-revise-loop")
-async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: int = Query(3)):
+async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: int = Query(5)):
     """循环自动修订：审计→修订→再审计，直到通过或达到上限"""
     load_env()
     s = sm(book_id)
@@ -793,6 +793,6 @@ def register_legacy_routes(app):
     async def legacy_auto_revise_loop(
         book_id: str = Query(...),
         chapter: int = Query(...),
-        max_rounds: int = Query(3),
+        max_rounds: int = Query(5),
     ):
         return await auto_revise_loop(book_id, chapter, max_rounds)
