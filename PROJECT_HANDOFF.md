@@ -49,7 +49,8 @@
 | **V7.4** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文生成+细纲+字数控制修复7个BUG |
 | **V7.5** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文端到端+细纲加载修复5个BUG |
 | **V7.6** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 审计+修订管线完整可用，修复12个BUG |
-| **V7.7（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 修订质量+循环修订增强，修复4个BUG+3项改进 |
+| **V7.7** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 修订质量+循环修订增强，修复4个BUG+3项改进 |
+| **V7.8（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文生成质量修复：蓝图剥离+场景覆盖+字数分配，修复3个BUG |
 
 ### 本地部署位置
 
@@ -225,6 +226,10 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 ✅ AI 修复（只写 draft，删除 final，字数控制，前端正确刷新）
 ✅ 自动修订（只写 draft，字数控制，需手动确认最终稿）
 ✅ 循环自动修订（最多5轮，最小改动约束，批量修复所有issues）
+✅ 正文后处理剥离蓝图/细纲元信息（4轮正则过滤）
+✅ 审计红线检测正文中的规划元信息（第6条红线 + 特别检查项）
+⏳ 正文完整覆盖细纲全部场景（4个场景全部写成小说正文，待验证）
+⏳ 场景字数按细纲分配（待验证）
 ⏳ 管线模式（写下一章 → 巡查 → 审计 → 修订循环，端到端测试中）
 ⏳ 情绪曲线（已修复前端res.data问题，待端到端测试）
 
@@ -234,7 +239,9 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 
 | 优先级 | 问题 | 说明 |
 |--------|------|------|
-| P1 | 正文生成端到端测试 | 细纲→正文→审计→修订完整跑通，验证WriterAgent产出质量 |
+| P1 | 正文场景覆盖完整性 | 细纲4个场景必须全部写成完整小说正文，不能跳过或压缩成大纲摘要 |
+| P1 | 场景字数按细纲分配 | 每个场景的字数应接近细纲标注的目标值（word_budget） |
+| P1 | 审计对正文质量的把控 | 审计应能发现场景缺失、内容不完整等结构性问题 |
 | P1 | f-string转义漏网排查 | ai_actions.py之外的其他router文件可能存在同类问题（enhanced.py/outline.py等） |
 | P2 | 前端其他功能对齐 | Token消耗面板、Checkpoint恢复、KB热加载等V6/V7新功能的Web UI验证 |
 | P2 | 大纲续写返回new_total_chapters | 后端未返回该字段，前端toast显示不完整 |
@@ -312,6 +319,52 @@ Reviser 的 spot-fix prompt 只说"只修改有问题的句子/段落"，但 LLM
 
 #### 坑49：不存在的 import 是运行时炸弹
 `AuditSeverity` 在 auditor.py 中从未定义（只在 `from __future__ import annotations` 下作为类型注解字符串存在），但 auto-revise-loop 直接 `from core.agents.auditor import AuditSeverity`。这个 import 在该代码路径首次执行前不会暴露。**规则**：新增 import 后立即验证目标模块确实导出了该符号。
+
+## 十八、V7.8 修复（云服务器镜像调试 2026-04-18）
+
+### 背景
+
+V7.7 审计→修订管线可用，但用户实测正文生成存在3个严重问题：1）LLM 把写前蓝图/细纲内容原样写进正文；2）细纲有4个场景，正文只写了2个就停了；3）审计只报2个 warning，没有发现蓝图混入和场景缺失。本轮修复3个BUG + 2项改进。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 61 | `core/agents/writer.py` | 正文中出现"写前蓝图"段落（核心冲突/情感旅程/结尾钩子等元信息） | prompt 给了蓝图信息但没有告诉 LLM 不要在输出中复述；LLM 把 prompt 结构当模板 | prompt 末尾加铁律（禁止输出规划信息）+ 后处理4轮正则剥离（写前蓝图标题/元叙述引用/细纲格式/核心冲突段落） |
+| 62 | `core/server/routers/ai_actions.py` | 正文只写了细纲4个场景中的前2个，后2个场景缺失或极度压缩 | scene_summaries 只提取了 beats 描述，没有场景名和 word_budget 字数标注；LLM 不知道每个场景该写多少字，把 token 全花在前两个场景 | scene_summaries 构造时加入场景名 + （目标XX字）标注，LLM 看到每个场景的字数目标 |
+| 63 | `core/agents/auditor.py` | 审计没有发现正文中混入了蓝图元信息，只报了2个 minor warning | 17条红线没有"正文中出现写作规划元信息"这条；审计 prompt 没有要求专项检查蓝图混入 | 红线新增第6条 + 审计 prompt 加"特别检查项"段落，要求优先扫描蓝图格式 |
+
+### 改进
+
+| 改进 | 文件 | 说明 |
+|------|------|------|
+| world_context 精简 | `ai_actions.py` | world.json 和 characters.json 的注入量从 2000→1200 字，减少 prompt 开销，留给输出更多 token |
+| prompt 指令精简 | `writer.py` | anti-dump 铁律从5行缩到1行，系统提示红线精简，避免 prompt 膨胀挤占输出空间 |
+
+### 已验证可工作
+
+✅ 正文不再出现"写前蓝图"等元信息（后处理自动剥离）
+✅ 审计能检测到蓝图混入（红线第6条触发 critical）
+⏳ 4个场景全部写完（待用户端到端验证）
+⏳ 场景字数按细纲分配（待验证）
+
+### 待验证
+
+- 场景覆盖完整性：4个场景是否都以完整小说正文呈现，不是大纲摘要
+- 字数分配精度：每个场景的字数是否接近细纲标注的目标值
+- prompt 精简效果：指令精简后，LLM 是否还会输出蓝图（需要多次测试确认后处理是否够用）
+
+### 踩坑记录（新增）
+
+#### 坑50：LLM 会复制 prompt 结构作为输出
+当 prompt 包含大量结构化信息（### 标题 + 要点列表）时，LLM 倾向于按相同结构"填充"输出，甚至原样复制 prompt 内容。**规则**：prompt 中的参考信息尽量用叙述段落而非结构化列表；对 LLM 输出必须加后处理过滤。
+
+#### 坑51：token 不够不是因为 max_tokens 小，而是 prompt 胖
+之前能跑通的 max_tokens=3000 在 prompt 膨胀后就不够了。单纯加 max_tokens 治标不治本，还会增加成本。**规则**：优先精简 prompt，而不是加大 max_tokens。每个 KB 注入（before_after 4000字 + writer-skills 4000字 + show-dont-tell 3000字）都在吃输出空间，需要定期审视是否全都需要。
+
+#### 坑52：scene_summaries 丢失场景边界信息
+将细纲的4个场景的 beats 拍平成一个列表后，LLM 失去了场景边界感知。它不知道哪些 beats 属于哪个场景，也不知道每个场景该写多长。**规则**：传给 writer 的场景摘要必须保留场景名、场景边界、和每个场景的目标字数。
+
 
 ## 七、小白操作手册
 
