@@ -253,8 +253,11 @@ class WriterAgent:
 绝对不能超过 {int(target_words*1.2)} 字。写到目标字数就收尾，不要展开额外情节。
 
 ---
-**重要：以上所有信息（节拍序列、核心冲突、情感旅程、结尾钩子、节奏建议等）是你的写作指引，绝对不要在正文中复述、引用或出现任何类似"写前蓝图""核心冲突""情感旅程""必须推进""结尾钩子"等元信息。**
-**正文直接从故事场景开始，第一个字就是小说内容。禁止任何形式的写作说明、规划摘要或元叙事。**
+**重要规则（违反将导致内容作废）：**
+1. 以上所有信息（节拍序列、核心冲突、情感旅程等）是你的写作指引，绝对不要在正文中复述、引用或出现任何"写前蓝图""核心冲突""情感旅程""必须推进""结尾钩子""节拍序列""场景拆分""目标："等元信息。
+2. 正文直接从故事场景开始，第一个字就是小说内容。禁止任何形式的写作说明、规划摘要或元叙事。
+3. **必须把节拍序列中每一个场景都写成小说正文**，不能跳过、不能缩写、不能用大纲替代。如果节拍序列有4个场景，你就必须写出4段完整的场景描写。
+4. 正文结束后不要写任何解释、注释、后续计划等内容。
 
 请直接开始写正文，写完后输出：
 {SETTLEMENT_SEPARATOR}
@@ -279,26 +282,46 @@ class WriterAgent:
 
             # 后处理：剥离 LLM 可能混入的蓝图/元信息段落
             import re as _re
-            # 匹配 "## 写前蓝图" 到下一个 "## " 或 "键盘声" 等正文开头的模式
+
+            # ── 第1轮：删除 "写前蓝图" 等标题段落 ──
             _blueprint_pattern = _re.compile(
-                r'(?:^|\n)#{1,3}\s*写前蓝图[\s\S]*?(?=\n#{1,3}\s|\n键盘|\n【|\n　|\n[A-Z\u4e00-\u9fff]{2,})',
+                r'(?:^|\n)#{1,3}\s*(?:写前蓝图|写作蓝图|章节大纲|章节细纲)[\s\S]*?(?=\n#{1,3}\s|\n键盘|\n【|\n　|\n[A-Z\u4e00-\u9fff]{2,})',
                 _re.MULTILINE
             )
             content = _blueprint_pattern.sub('', content).strip()
-            # 备用：如果蓝图没有标题但以 "核心冲突：" 开头（紧跟在章标题后）
+
+            # ── 第2轮：删除 "但是章节大纲里写着" / "但是环节X里写着" 等元叙述 ──
+            _meta_ref_pattern = _re.compile(
+                r'(?:^|\n)(?:但是|但是)?(?:章节大纲|章节细纲|大纲|细纲|环节[一二三四五六七八九十]|细章)[^\n]{0,20}里写着[：:][\s\S]*?(?=\n\n|\Z)',
+                _re.MULTILINE
+            )
+            content = _meta_ref_pattern.sub('', content).strip()
+
+            # ── 第3轮：删除细纲格式内容（场景拆分/目标/冲突/节拍/埋伏笔/结尾钩子） ──
+            # 这些是细纲特有的格式，不应该出现在正文中
+            _outline_markers = [
+                r'(?:^|\n)(?:细纲|详细大纲|场景拆分)[^\n]*',
+                r'(?:^|\n)\s*(?:目标|冲突|节拍|埋伏笔|结尾钩子)\s*[：:].*',
+                r'(?:^|\n)\s*\*\s*(?:目标|冲突|节拍|埋伏笔|结尾钩子)\s*[：:].*',
+                r'(?:^|\n)本章通过明暗双线.*',
+                r'(?:^|\n)编辑\s*$',
+                r'(?:^|\n)收起/展开\s*$',
+            ]
+            for _pat in _outline_markers:
+                content = _re.sub(_pat, '', content, flags=_re.MULTILINE)
+
+            # ── 第4轮：如果 "核心冲突" 和 "情感旅程" 同时出现在前500字，截掉 ──
             if '核心冲突' in content[:500] and '情感旅程' in content[:500]:
                 _lines = content.split('\n')
                 _cut = 0
                 for _i, _l in enumerate(_lines):
                     _lstrip = _l.strip()
                     if _lstrip.startswith('**核心冲突') or _lstrip.startswith('* **核心冲突'):
-                        # 往前找章标题
                         _start = _i
                         for _j in range(_i-1, max(_i-5, -1), -1):
                             if _lines[_j].strip().startswith('#') or not _lines[_j].strip():
                                 _start = _j
                                 break
-                        # 往后找结束：空行后跟正文内容
                         _end = _i
                         for _j in range(_i+1, min(_i+30, len(_lines))):
                             if _lines[_j].strip() == '' and _j > _i + 3:
@@ -311,6 +334,9 @@ class WriterAgent:
                         break
                 if _cut > 0:
                     content = '\n'.join(_lines[_cut:]).strip()
+
+            # 清理多余空行
+            content = _re.sub(r'\n{4,}', '\n\n\n', content).strip()
 
             settlement = PostWriteSettlement()
             if len(parts) > 1:
