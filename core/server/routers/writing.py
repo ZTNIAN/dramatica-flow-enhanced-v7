@@ -449,7 +449,7 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
         critical = [i for i in report.issues if i.severity == "critical"]
         if not critical:
             # Force warnings to critical so reviser processes them
-            from core.agents.auditor import AuditIssue as _AI, AuditSeverity as _AS
+            from core.agents.auditor import AuditIssue as _AI
             forced_issues = [_AI(dimension=i.dimension, severity="critical",
                                  description=i.description, location=i.location,
                                  suggestion=i.suggestion, excerpt=i.excerpt) for i in report.issues]
