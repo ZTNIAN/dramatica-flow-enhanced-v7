@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-18（V7.6 审计+修订管线完整可用）
-> 版本：V7.6（V7.5 + 审计→修订→循环修订完整管线修复8个BUG）
+> 最后更新：2026-04-18（V7.7 修订质量+循环修订增强）
+> 版本：V7.7（V7.6 + AI修复保存逻辑+字数控制+修订质量+循环轮数提升，修复4个BUG+3项改进）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ---
@@ -45,7 +45,11 @@
 | **V6** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v6 | 修复端点+自适应审查+闭环+追踪+热加载+恢复 |
 | **V7** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | Web UI对齐CLI + 自检修复12个BUG |
 | **V7.2** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 首次实测部署修复7个阻断性BUG |
-| **V7.3（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 云服务器镜像调试修复9个BUG |
+| **V7.3** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 云服务器镜像调试修复9个BUG |
+| **V7.4** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文生成+细纲+字数控制修复7个BUG |
+| **V7.5** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 正文端到端+细纲加载修复5个BUG |
+| **V7.6** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 审计+修订管线完整可用，修复12个BUG |
+| **V7.7（当前）** | https://github.com/ZTNIAN/dramatica-flow-enhanced-v7 | 修订质量+循环修订增强，修复4个BUG+3项改进 |
 
 ### 本地部署位置
 
@@ -218,6 +222,9 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 ✅ AI 修复（POST /api/books/{id}/ai-rewrite-segment → 200，全文修订+前端刷新）
 ✅ 自动修订（POST /api/action/revise → 200）
 ✅ 循环自动修订（POST /api/action/auto-revise-loop → 200，最多3轮审计→修订循环）
+✅ AI 修复（只写 draft，删除 final，字数控制，前端正确刷新）
+✅ 自动修订（只写 draft，字数控制，需手动确认最终稿）
+✅ 循环自动修订（最多5轮，最小改动约束，批量修复所有issues）
 ⏳ 管线模式（写下一章 → 巡查 → 审计 → 修订循环，端到端测试中）
 ⏳ 情绪曲线（已修复前端res.data问题，待端到端测试）
 
@@ -234,6 +241,77 @@ data = _json.loads(_re.sub(r"^\s*```(?:json)?\s*", "", resp.content.strip(), fla
 | P2 | 细纲字数权重范围调优 | 当前weight 1-10差异过大，可考虑缩小到1-5或限制比例 |
 
 ---
+
+
+
+## 十七、V7.7 修复（云服务器镜像调试 2026-04-18）
+
+### 背景
+
+V7.6 跑通了审计→修订→循环修订管线，但用户实测发现两个严重问题：1）AI修复后前端显示内容不变（实际改了但读不到）；2）AI修复后字数失控（目标2000字输出4337字）。另外用户反馈"逐个AI修复问题越修越多"，揭示了修订策略的根本问题。本轮修复4个BUG + 3项改进。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 57 | `core/server/routers/writing.py` | AI修复成功但前端显示不变 | `ai-rewrite-segment` 只 `save_draft()`，但 GET /chapters 优先读 `read_final()`，旧 final 未被清除 | 修订后删除旧 final 文件，前端 fallback 到显示修订后的 draft |
+| 58 | `core/server/routers/writing.py` | AI修复后字数4337字（目标2000） | Reviser 无字数约束，LLM 自由发挥 | 修订后增加字数后处理：超过 target×1.2 按段落/句号截断（3个修订入口统一处理） |
+| 59 | `core/server/routers/writing.py` | 循环自动修订 ImportError | `from core.agents.auditor import AuditSeverity` 但 `AuditSeverity` 从未定义 | 删除未使用的 import |
+| 60 | `core/server/routers/writing.py` | 自动修订/循环修订自动升 final | `revise` 和 `auto-revise-loop` 都 `save_draft()` + `save_final()`，用户失去手动确认机会 | 改为只 save_draft()，删除旧 final，需用户手动"确认最终稿" |
+
+### 改进
+
+| 改进 | 文件 | 说明 |
+|------|------|------|
+| Reviser 最小改动约束 | `core/agents/reviser.py` | prompt 新增5条硬约束：只改问题句、未被指出的一字不动、不"顺便优化"；system message 同步强化 |
+| 循环修订 3→5 轮 | `writing.py` + `web_ui` | `max_rounds` 默认 3→5，给更多修复机会 |
+| UI 引导提示 | `dramatica_flow_web_ui.html` | 多问题时显示"建议用循环修订"提示；单个修复按钮加 hover 说明 |
+
+### 修订策略改进说明
+
+**问题根因**：逐个点击"AI修复此问题"时，每次都是全文重写。修复第1个问题后文本变了，第2个问题的 excerpt 定位失效，而且 LLM 每次重写都可能"顺便"改其他地方，引入新问题。
+
+**V7.7 改进后的两种修订方式：**
+
+1. **「✨ AI 修复此问题」**（单问题精准修复）
+   - 适合：只有1-2个小问题
+   - 逻辑：看到全部问题 → AI一次性全部修复 → 最小改动约束限制幅度
+   - 约束：只改问题涉及的句子，其余一字不动
+
+2. **「🔄 循环自动修订」**（多问题批量修复）⭐推荐
+   - 适合：问题较多（3个以上）
+   - 逻辑：审计 → 全部issues一次性传给AI → 修订 → 再审计 → 最多5轮
+   - 每轮都读最新内容重新审计，不会定位失效
+
+**工作流建议：**
+```
+写完一章 → 确认最终稿 → 审计
+  → 通过 ✅ → 继续下一章
+  → 不通过 → 点「🔄 循环自动修订」（别逐个点AI修复）
+    → 审计通过 ✅ → 检查内容 → 确认最终稿
+    → 还有问题 → 再跑一轮
+```
+
+### 已验证可工作
+
+✅ AI 修复此问题（只写 draft，删 final，前端正确显示修订内容）
+✅ 自动修订（只写 draft，需手动确认最终稿）
+✅ 循环自动修订（5轮，最小改动约束，字数控制）
+✅ 字数控制（修订后不超过 target×1.2）
+
+### 踩坑记录（新增）
+
+#### 坑46：read_final 优先级导致修订"隐形"
+GET /chapters 返回 `read_final() or read_draft()`，final 优先。如果修订只写 draft 不删 final，前端永远显示旧 final。**规则**：修订类端点必须同时处理 final 文件（删除或更新），不能只写 draft 就完事。
+
+#### 坑47：LLM 修订会"顺便优化"导致越修越多
+Reviser 的 spot-fix prompt 只说"只修改有问题的句子/段落"，但 LLM 经常"顺便"优化其他段落。**解决方案**：在 prompt 中用多条硬约束强调最小改动，在 system message 中明确禁止"顺便优化"。
+
+#### 坑48：逐个修复 vs 批量修复的根本差异
+逐个修复每次全文重写，N个问题需要N次重写，每次都有引入新问题的风险。批量修复一次重写解决所有问题，只引入一次风险。**规则**：多个问题永远用批量修复（循环修订），单个问题才用逐个修复。
+
+#### 坑49：不存在的 import 是运行时炸弹
+`AuditSeverity` 在 auditor.py 中从未定义（只在 `from __future__ import annotations` 下作为类型注解字符串存在），但 auto-revise-loop 直接 `from core.agents.auditor import AuditSeverity`。这个 import 在该代码路径首次执行前不会暴露。**规则**：新增 import 后立即验证目标模块确实导出了该符号。
 
 ## 七、小白操作手册
 
@@ -551,7 +629,7 @@ dramatica-flow-enhanced-v7/
     ├── 巡查者：快速扫描
     ├── 场景审核 + 心理审核
     ├── 审计员：9维度加权评分
-    │   └── 合并所有审查问题 → 不通过 → 修订（最多3轮）
+    │   └── 合并所有审查问题 → 不通过 → 修订（最多5轮）
     ├── 自适应审查判断
     ├── 风格一致性检查
     ├── 保存最终稿
@@ -570,7 +648,7 @@ dramatica-flow-enhanced-v7/
 
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
-| `PIPELINE_MAX_REVISE_ROUNDS` | 3 | 最大修订轮数 |
+| `PIPELINE_MAX_REVISE_ROUNDS` | 5 | 最大修订轮数 |
 | `PIPELINE_MIROFISH_INTERVAL` | 5 | MiroFish每N章触发 |
 | `PIPELINE_REVIEW_MODE` | adaptive | 审查模式：all/light/minimal/adaptive |
 | `PIPELINE_AUDIT_PASS_TOTAL` | 95 | 审计通过加权总分 |
