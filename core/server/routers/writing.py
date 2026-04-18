@@ -408,29 +408,46 @@ def list_audit_results(book_id: str):
 
 @router.post("/{book_id}/ai-rewrite-segment")
 async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
-    """AI 重写指定段落"""
+    """AI 重写指定段落（支持审计修复和手动选段两种模式）"""
     load_env()
     s = sm(book_id)
     content = s.read_final(req.chapter) or s.read_draft(req.chapter)
     if not content:
         raise HTTPException(404, f"第 {req.chapter} 章不存在")
 
-    lines = content.split("\n")
-    start = max(0, req.start_line - 1)
-    end = min(len(lines), req.end_line)
-    segment = "\n".join(lines[start:end])
-    if not segment.strip():
-        raise HTTPException(400, "选中段落为空")
-
     from core.agents import ReviserAgent
     llm = create_llm()
     reviser = ReviserAgent(llm)
+
     try:
-        result = await run_sync(reviser.revise, segment, [], mode="spot-fix")
-        new_lines = lines[:start] + result.content.split("\n") + lines[end:]
-        new_content = "\n".join(new_lines)
+        instruction = req.instruction or req.reason or "提升质量"
+        original = req.original_text or ""
+
+        if original and len(original) > 5:
+            # Targeted fix: rewrite the specific excerpt
+            pos = content.find(original)
+            if pos >= 0:
+                result = await run_sync(reviser.revise, original, [], mode="spot-fix")
+                new_content = content[:pos] + result.content + content[pos + len(original):]
+            else:
+                # Excerpt not found in content, pass instruction via issues
+                from core.agents.auditor import AuditIssue
+                fake_issues = [AuditIssue(dimension="综合", severity="warning",
+                                         description=instruction, suggestion=instruction)]
+                result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
+                new_content = result.content
+        else:
+            # Audit "AI 修复此问题" with no excerpt: apply instruction to full chapter
+            from core.agents.auditor import AuditIssue
+            fake_issues = [AuditIssue(dimension="综合", severity="warning",
+                                     description=instruction, suggestion=instruction)]
+            result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
+            new_content = result.content
+
         s.save_draft(req.chapter, new_content)
-        return {"ok": True, "old_segment": segment, "new_segment": result.content, "changes": result.changes_summary}
+        return {"ok": True, "rewritten": new_content, "changes": result.changes_summary}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"重写失败：{e}")
 
