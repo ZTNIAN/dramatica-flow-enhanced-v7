@@ -210,9 +210,14 @@ class ContinueWritingReq(BaseModel):
 
 class SegmentRewriteReq(BaseModel):
     chapter: int
-    start_line: int
-    end_line: int
-    reason: str = "提升质量"
+    original_text: str = ""
+    instruction: str = "提升质量"
+    context_before: str = ""
+    context_after: str = ""
+    # Legacy line-based fields (backward compat)
+    start_line: int = 0
+    end_line: int = 0
+    reason: str = ""
 
 class CharacterGrowthReq(BaseModel):
     character_id: str | None = None
