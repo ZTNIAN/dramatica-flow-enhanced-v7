@@ -439,7 +439,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
             seqs = outline_data.get("sequences", [])
-            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:600]}"
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:1200]}"
         except Exception:
             pass
 
@@ -449,9 +449,11 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             all_cos = json.loads(co_path.read_text(encoding="utf-8"))
             for co in all_cos:
-                if co.get("chapter_number") == req.chapter:
+                if int(co.get("chapter_number", 0)) == int(req.chapter):
                     chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:400]}"
                     break
+            if not chapter_outline_ctx:
+                logging.warning(f"[V7.16] Chapter {req.chapter} outline not found in chapter_outlines.json (total {len(all_cos)} entries)")
         except Exception:
             pass
 
@@ -463,7 +465,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             wp = s.book_dir / "setup" / wf  # fallback 到 setup/
         if wp.exists():
             try:
-                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:400]}"
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:800]}"
             except Exception:
                 pass
 
@@ -488,10 +490,11 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 
 返回 JSON：{{"title": "...", "detailed_summary": "...", "scenes": [{{"scene_title": "...", "location": "...", "characters": ["..."], "goal": "...", "conflict": "...", "weight": 5, "beats": ["..."]}}], "hooks_to_plant": ["..."], "chapter_end_hook": "...", "emotional_arc": {{"start": "...", "end": "..."}}}}"""
     try:
-        _llm = create_llm(max_tokens=4096)
+        _llm = create_llm(max_tokens=8192)
         resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
         import json as _json, re as _re
         _raw = resp.content.strip()
+        logging.info(f"[V7.16] detailed-outline ch{req.chapter} raw len={len(_raw)}")
         _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
         _raw = _raw.replace("```", "").strip()
         _first = _raw.find("{")
@@ -501,17 +504,26 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         _raw = _raw.rstrip(", \n")
         try:
             data = _json.loads(_raw)
-        except _json.JSONDecodeError:
-            _open_b = _raw.count("{")
-            _close_b = _raw.count("}")
-            _open_s = _raw.count("[")
-            _close_s = _raw.count("]")
-            _patched = _raw
+        except _json.JSONDecodeError as e:
+            logging.warning(f"[V7.16] JSON parse failed: {e}, attempting repair...")
+            _raw2 = _re.sub(r'[\x00-\x1f]', '', _raw)
+            if _raw2.count('"') % 2 != 0:
+                _raw2 += '"'
+            _open_b = _raw2.count("{")
+            _close_b = _raw2.count("}")
+            _open_s = _raw2.count("[")
+            _close_s = _raw2.count("]")
             if _close_s < _open_s:
-                _patched += "]" * (_open_s - _close_s)
+                _raw2 += "]" * (_open_s - _close_s)
             if _close_b < _open_b:
-                _patched += "}" * (_open_b - _close_b)
-            data = _json.loads(_patched)
+                _raw2 += "}" * (_open_b - _close_b)
+            try:
+                data = _json.loads(_raw2)
+                logging.info(f"[V7.16] JSON repair succeeded")
+            except _json.JSONDecodeError as e2:
+                logging.error(f"[V7.16] JSON repair also failed: {e2}")
+                logging.error(f"[V7.16] Raw content (first 500): {_raw[:500]}")
+                raise
         data["chapter"] = req.chapter
 
         # ── 场景字数归一化：按 weight 比例分配 target_words ──
