@@ -140,9 +140,30 @@ async def api_emotion_curve(book_id: str, req: EmotionCurveReq | None = None):
         total = 30
     try:
         result = await run_sync(designer.design_emotion_curve, total)
-        return {"ok": True, "result": dc_to_dict(result)}
+        result_dict = dc_to_dict(result)
+        # ── 持久化到文件 ──
+        try:
+            ec_path = s.state_dir / "emotion_curve.json"
+            ec_path.write_text(json.dumps(result_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        return {"ok": True, "result": result_dict}
     except Exception as e:
         raise HTTPException(500, f"情绪曲线设计失败：{e}")
+
+
+@router.get("/{book_id}/emotion-curve")
+def api_get_emotion_curve(book_id: str):
+    """获取已保存的情绪曲线"""
+    s = sm(book_id)
+    path = s.state_dir / "emotion_curve.json"
+    if not path.exists():
+        raise HTTPException(404, "情绪曲线不存在，请先生成")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"ok": True, "result": data}
+    except Exception:
+        raise HTTPException(500, "读取情绪曲线失败")
 
 
 @router.post("/{book_id}/feedback")
