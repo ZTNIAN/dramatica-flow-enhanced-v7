@@ -780,14 +780,20 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 )
                 _part = _result.content.strip()
                 # ── 场景级字数截断：超过 budget×1.2 强制截断 ──
+                _raw_len = len(_part)
                 if _scene_target > 0:
                     _max_scene_chars = int(_scene_target * 1.2)
-                    if len(_part) > _max_scene_chars:
+                    if _raw_len > _max_scene_chars:
                         _cut = _part.rfind("。", int(_scene_target * 0.8), _max_scene_chars + 100)
                         if _cut > int(_scene_target * 0.8):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
+                        logging.info(f"[V7.14] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
+                    else:
+                        logging.info(f"[V7.14] Scene{_idx+1} OK: {_raw_len} <= { _max_scene_chars} (target={_scene_target})")
+                else:
+                    logging.info(f"[V7.14] Scene{_idx+1}: _scene_target=0, BUDGET={_budget}, raw={_raw_len}")
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
@@ -814,6 +820,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             settlement = _settlement
 
         # ═══ 全局后处理 ═══
+        logging.info(f"[V7.14] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.2)}")
         # 1. 字数截断
         max_chars = int(target_words * 1.2)
         if len(content) > max_chars:
@@ -840,6 +847,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         _hp = _hp[len(_px):]
                         break
                 content = content.rstrip() + "\n\n" + _hp[:300]
+        logging.info(f"[V7.14] Final content: {len(content)} chars")
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(settlement) if settlement else None}
