@@ -270,7 +270,7 @@ class WriterAgent:
 绝对不能超过 {int(target_words*1.2)} 字。
 
 ---
-**铁律：①禁止在正文中输出任何规划信息（蓝图/大纲/细纲/节拍/核心冲突/情感旅程/目标/冲突等）。②正文必须包含节拍序列中所有场景，不能跳过。③正文直接从场景开始，不要写任何解释说明。④每个场景字数严格控制在预算内，精练推进。写完最后一个场景前，确认剩余字数足够，不能让最后1个场景被挤掉。**
+**铁律：①禁止在正文中输出任何规划信息（蓝图/大纲/细纲/节拍/核心冲突/情感旅程/目标/冲突等）。②正文必须包含节拍序列中所有场景，不能跳过。③正文直接从场景开始，不要写任何解释说明。④每个场景字数严格控制在预算内，精练推进。⑤每写完一个场景，必须在该场景末尾另起一行输出进度标记：`[场景N/共{_num_scenes if _scene_budgets else '?'}个场景 完]`。全部{_num_scenes if _scene_budgets else '?'}个场景都写完后，才能写结尾钩子和结算表。这是强制要求，漏掉任何一个标记=任务失败。**
 
 请直接开始写正文，写完后输出：
 {SETTLEMENT_SEPARATOR}
@@ -350,6 +350,27 @@ class WriterAgent:
 
             # 清理多余空行
             content = _re.sub(r'\n{4,}', '\n\n\n', content).strip()
+
+            # ── 第5轮：场景进度标记验证 + 安全剥离 ──
+            # 标记格式：[场景N/共M个场景 完] 或 [场景N/M 完] 等变体
+            _marker_pattern = _re.compile(r'\[场景\s*(\d+)\s*/\s*(?:共)?\s*(\d+)\s*(?:个场景)?\s*完\]')
+            _found_markers = _marker_pattern.findall(content)
+            _expected_scenes = len(_scene_budgets) if _scene_budgets else 0
+            _found_count = len(_found_markers)
+
+            if _expected_scenes > 0 and _found_count < _expected_scenes:
+                _found_nums = sorted(set(int(n) for n, _ in _found_markers))
+                _missing = [i for i in range(1, _expected_scenes + 1) if i not in _found_nums]
+                import logging
+                logging.warning(
+                    f"⚠️ 场景覆盖不完整：期望{_expected_scenes}个场景，只找到{_found_count}个标记 "
+                    f"（已有：{_found_nums}，缺失：{_missing}）。正文可能缺少场景。"
+                )
+
+            # 剥离所有进度标记（这些是写作指令，不应出现在最终正文中）
+            content = _marker_pattern.sub('', content).strip()
+            # 清理标记残留的多余空行
+            content = _re.sub(r'\n{3,}', '\n\n', content).strip()
 
             settlement = PostWriteSettlement()
             if len(parts) > 1:
