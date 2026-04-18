@@ -381,8 +381,8 @@ async def ai_generate_chapter_outlines(book_id: str):
 每个章纲包含：
 - chapter_number: 章号
 - title: 章标题
-- summary: 章节概述
-- beats: 情节节拍数组（每个含 id, description, dramatic_function）
+- summary: 章节概述（1-2句话）
+- beats: 情节节拍数组（每个含 id, description, dramatic_function）。【关键约束】每章严格 2 个场景、每个场景 3 个节拍（共6个节拍）。本章目标 {target_words_ch} 字，节奏要紧凑，不铺垫过多，一场戏一个核心推进。
 - emotional_arc: {{"start": "起始情绪", "end": "结束情绪"}}
 - target_words: 目标字数（统一使用 {target_words_ch}）
 
@@ -483,7 +483,8 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 
 要求：
 - 必须严格遵循章纲的情节方向，不能偏离故事主线
-- 拆分为 2-4 个场景，每个场景包含地点、人物、冲突、情节节拍
+- 【关键约束】严格拆分为 2 个场景，每个场景 2-3 个节拍（共4-6个节拍）。本章总字数 {target_words} 字，节奏紧凑，不铺不拖
+- 每个场景包含地点、人物、冲突、情节节拍
 - 规划伏笔植入点和章末钩子
 - 情绪弧线要与章纲一致
 - 每个场景用 weight（1-10）标注情节权重：过渡/铺垫=2-3，冲突推进=5-6，高潮/转折=8-10，收束=3-4。系统会按权重比例自动计算 word_budget
@@ -793,7 +794,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent（逐场景调用，确保每个场景都覆盖） ──
     from core.agents import WriterAgent
-    chapter_max_tokens = min(8192, max(2048, int(target_words * 3.5)))
+    chapter_max_tokens = min(8192, max(2048, int(target_words * 2.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
@@ -900,7 +901,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 elif _idx == 0:
                     _prior_ctx = prior_summaries
 
-                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 2.5)))
+                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 2.0)))
                 _scene_llm = create_llm(max_tokens=_scene_max_tokens)
                 _scene_writer = WriterAgent(_scene_llm, style_guide=style_guide, genre=genre)
 
@@ -915,10 +916,10 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     emotional_arcs=emotional_arcs,
                 )
                 _part = _result.content.strip()
-                # ── 场景级字数截断：超过 budget×1.5 强制截断 ──
+                # ── 场景级字数截断：超过 budget×1.3 强制截断 ──
                 _raw_len = len(_part)
                 if _scene_target > 0:
-                    _max_scene_chars = int(_scene_target * 1.5)
+                    _max_scene_chars = int(_scene_target * 1.3)
                     if _raw_len > _max_scene_chars:
                         _cut = -1
                         # 优先按段落边界截断
@@ -933,9 +934,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
-                        logging.info(f"[V7.17] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
+                        logging.info(f"[V7.18] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
                     else:
-                        logging.info(f"[V7.17] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
+                        logging.info(f"[V7.18] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
                 else:
                     logging.info(f"[V7.14] Scene{_idx+1}: _scene_target=0, BUDGET={_budget}, raw={_raw_len}")
                 # 去掉非首个场景可能重复的章节标题
@@ -964,9 +965,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             settlement = _settlement
 
         # ═══ 全局后处理 ═══
-        logging.info(f"[V7.17] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.5)}")
+        logging.info(f"[V7.18] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.3)}")
         # 1. 字数截断
-        max_chars = int(target_words * 1.5)
+        max_chars = int(target_words * 1.3)
         if len(content) > max_chars:
             _lower = int(target_words * 0.5)
             _upper = len(content)
@@ -983,7 +984,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 content = content[:cut_pos+1].rstrip()
             else:
                 content = content[:max_chars]
-            logging.info(f"[V7.17] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
+            logging.info(f"[V7.18] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
         # 2. 结尾钩子后处理
         if _hook_text:
             _found = False
@@ -998,7 +999,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         _hp = _hp[len(_px):]
                         break
                 content = content.rstrip() + "\n\n" + _hp[:300]
-        logging.info(f"[V7.17] Final content: {len(content)} chars")
+        logging.info(f"[V7.18] Final content: {len(content)} chars")
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(settlement) if settlement else None}
