@@ -249,7 +249,7 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
             _fp = s.book_dir / "setup" / _fname  # fallback 到 setup/
         if _fp.exists():
             try:
-                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:800]}"
+                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:1500]}"
             except Exception:
                 pass
 
@@ -366,7 +366,7 @@ async def ai_generate_chapter_outlines(book_id: str):
             _fp = s.book_dir / "setup" / _fname
         if _fp.exists():
             try:
-                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:800]}"
+                world_ctx += f"\n{_fname}：{_fp.read_text(encoding='utf-8')[:1500]}"
             except Exception:
                 pass
 
@@ -439,7 +439,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
         try:
             outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
             seqs = outline_data.get("sequences", [])
-            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:1200]}"
+            outline_ctx = f"故事大纲序列：{json.dumps([{'id': sq.get('id',''), 'title': sq.get('title',''), 'summary': sq.get('summary','')} for sq in seqs[:10]], ensure_ascii=False)[:2000]}"
         except Exception:
             pass
 
@@ -450,7 +450,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             all_cos = json.loads(co_path.read_text(encoding="utf-8"))
             for co in all_cos:
                 if int(co.get("chapter_number", 0)) == int(req.chapter):
-                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:400]}"
+                    chapter_outline_ctx = f"本章章纲：{json.dumps(co, ensure_ascii=False)[:1500]}"
                     break
             if not chapter_outline_ctx:
                 logging.warning(f"[V7.16] Chapter {req.chapter} outline not found in chapter_outlines.json (total {len(all_cos)} entries)")
@@ -465,7 +465,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
             wp = s.book_dir / "setup" / wf  # fallback 到 setup/
         if wp.exists():
             try:
-                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:800]}"
+                world_ctx += f"\n{wf}：{wp.read_text(encoding='utf-8')[:1500]}"
             except Exception:
                 pass
 
