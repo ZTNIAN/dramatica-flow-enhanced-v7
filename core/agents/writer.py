@@ -221,7 +221,7 @@ class WriterAgent:
             _lines_bt = [f"本章共{_num_scenes}个场景，总目标{target_words}字。每个场景字数上限："]
             for _i, (_name, _budget) in enumerate(_scene_budgets, 1):
                 _lines_bt.append(f"  场景{_i}「{_name}」→ 不超过{_budget}字（±10%）")
-            _lines_bt.append(f"\n⚠️ 所有{_num_scenes}个场景必须全部写完。每个场景精练推进，不要展开额外细节，把字数留给后续场景。")
+            _lines_bt.append(f"\n⚠️ 所有{_num_scenes}个场景必须全部写完。每个场景严格控制在预算字数内，精练推进，不展开额外描写。全章总计不超过{target_words}字。")
             _budget_table = "\n".join(_lines_bt)
 
         prompt = f"""\
@@ -267,7 +267,7 @@ class WriterAgent:
 
 ### 字数要求
 {_budget_table}
-绝对不能超过 {int(target_words*1.2)} 字。
+绝对不能超过 {int(target_words*1.3)} 字。宁可少写不要超。超字数=废稿。
 
 ---
 **铁律：①禁止在正文中输出任何规划信息（蓝图/大纲/细纲/节拍/核心冲突/情感旅程/目标/冲突等）。②正文必须包含节拍序列中所有场景，不能跳过。③正文直接从场景开始，不要写任何解释说明。④每个场景字数严格控制在预算内，精练推进。**
