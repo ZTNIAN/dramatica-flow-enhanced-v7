@@ -394,10 +394,15 @@ async def ai_generate_chapter_outlines(book_id: str):
         _raw = resp.content.strip()
         _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
         _raw = _raw.replace("```", "").strip()
-        _first = _raw.find("{")
-        _last = _raw.rfind("}")
-        if _first >= 0 and _last > _first:
-            _raw = _raw[_first:_last+1]
+        # 提取 JSON：章纲是数组，优先找 [...]
+        _arr_first = _raw.find("[")
+        _arr_last = _raw.rfind("]")
+        _obj_first = _raw.find("{")
+        _obj_last = _raw.rfind("}")
+        if _arr_first >= 0 and _arr_last > _arr_first:
+            _raw = _raw[_arr_first:_arr_last+1]
+        elif _obj_first >= 0 and _obj_last > _obj_first:
+            _raw = _raw[_obj_first:_obj_last+1]
         _raw = _raw.rstrip(", \n")
         try:
             data = _json.loads(_raw)
