@@ -628,7 +628,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             try:
                 all_cos = json.loads(co_path.read_text(encoding="utf-8"))
                 for co in all_cos:
-                    if co.get("chapter_number") == req.chapter:
+                    if int(co.get("chapter_number", 0)) == int(req.chapter):
                         chapter_title = co.get("title", "")
                         beats = co.get("beats", [])
                         parts = []
@@ -732,7 +732,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
         try:
             all_cos2 = json.loads(co_path2.read_text(encoding="utf-8"))
             for co in all_cos2:
-                if co.get("chapter_number") == req.chapter:
+                if int(co.get("chapter_number", 0)) == int(req.chapter):
                     ea = co.get("emotional_arc", {})
                     if ea and not emotional_journey.get("start"):
                         emotional_journey = {"start": ea.get("start", "平静"), "end": ea.get("end", "紧张")}
