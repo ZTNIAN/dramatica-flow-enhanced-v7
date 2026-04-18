@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -207,6 +208,22 @@ class WriterAgent:
   "emotional_changes": [{"character_id": "角色ID", "emotion": "情绪", "intensity": 7, "trigger": "触发原因"}]
 }"""
 
+        # ── 解析场景字数，构建分配表 ──
+        _scene_budgets = []
+        for _line in scene_summaries.split("\n"):
+            _m = re.match(r'^###\s+(.+?)（目标(\d+)字）', _line)
+            if _m:
+                _scene_budgets.append((_m.group(1), int(_m.group(2))))
+        _budget_table = ""
+        if _scene_budgets:
+            _num_scenes = len(_scene_budgets)
+            _total_budget = sum(b for _, b in _scene_budgets)
+            _lines_bt = [f"本章共{_num_scenes}个场景，总目标{target_words}字。每个场景字数上限："]
+            for _i, (_name, _budget) in enumerate(_scene_budgets, 1):
+                _lines_bt.append(f"  场景{_i}「{_name}」→ 不超过{_budget}字（±10%）")
+            _lines_bt.append(f"\n⚠️ 所有{_num_scenes}个场景必须全部写完。每个场景精练推进，不要展开额外细节，把字数留给后续场景。")
+            _budget_table = "\n".join(_lines_bt)
+
         prompt = f"""\
 ## 写作任务：第 {chapter_number} 章{f'《{chapter_title}》' if chapter_title else ''}
 
@@ -249,11 +266,11 @@ class WriterAgent:
 {blueprint.pre_write_checklist.risk_scan}
 
 ### 字数要求
-目标 {target_words} 字（允许 ±10%，即 {int(target_words*0.9)}–{int(target_words*1.1)} 字）
-绝对不能超过 {int(target_words*1.2)} 字。写到目标字数就收尾，不要展开额外情节。
+{_budget_table}
+绝对不能超过 {int(target_words*1.2)} 字。
 
 ---
-**铁律：①禁止在正文中输出任何规划信息（蓝图/大纲/细纲/节拍/核心冲突/情感旅程/目标/冲突等）。②正文必须包含节拍序列中所有场景，不能跳过。③正文直接从场景开始，不要写任何解释说明。**
+**铁律：①禁止在正文中输出任何规划信息（蓝图/大纲/细纲/节拍/核心冲突/情感旅程/目标/冲突等）。②正文必须包含节拍序列中所有场景，不能跳过。③正文直接从场景开始，不要写任何解释说明。④每个场景字数严格控制在预算内，精练推进。写完最后一个场景前，确认剩余字数足够，不能让最后1个场景被挤掉。**
 
 请直接开始写正文，写完后输出：
 {SETTLEMENT_SEPARATOR}
