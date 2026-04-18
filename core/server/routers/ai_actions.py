@@ -641,7 +641,18 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         _beats_parts.append(f"- {_b}")
                     elif isinstance(_b, dict):
                         _beats_parts.append(f"- {_b.get('description', str(_b))}")
-                _scenes_list.append((_header, "\n".join(_beats_parts), _budget_int))
+                # V7.10: 提取场景级额外信息（叙事手法/伏笔/结尾钩子）
+                _extra_parts = []
+                _narr = _sc.get("narrative_technique", _sc.get("叙事手法", ""))
+                if _narr:
+                    _extra_parts.append(f"叙事手法：{_narr}")
+                _foil = _sc.get("foreshadowing", _sc.get("埋伏笔", ""))
+                if _foil:
+                    _extra_parts.append(f"埋伏笔：{_foil}")
+                _hook = _sc.get("ending_hook", _sc.get("结尾钩子", ""))
+                if _hook:
+                    _extra_parts.append(f"结尾钩子：{_hook}")
+                _scenes_list.append((_header, "\n".join(_beats_parts), _budget_int, "\n".join(_extra_parts)))
         except Exception:
             pass
 
@@ -662,14 +673,25 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             # ── 逐场景调用：每个场景单独一次 LLM 调用 ──
             _all_parts = []
             _settlement = None
-            for _idx, (_header, _beats, _budget) in enumerate(_scenes_list):
+            _scene_count = len(_scenes_list)
+            for _idx in range(_scene_count):
+                _item = _scenes_list[_idx]
+                _header, _beats, _budget = _item[0], _item[1], _item[2]
+                _extra = _item[3] if len(_item) > 3 else ""
                 _scene_summary = f"{_header}\n{_beats}"
-                _scene_target = _budget if _budget > 0 else target_words // len(_scenes_list)
-                # 前面已写内容作为上下文（取最后800字）
+                # V7.10: 注入叙事手法等额外信息
+                if _extra:
+                    _scene_summary += f"\n\n【本场景要求】\n{_extra}"
+                # V7.10: 最后一个场景注入章节结尾钩子
+                if _idx == _scene_count - 1 and chapter_end_hook:
+                    _scene_summary += f"\n\n【本章结尾钩子要求】{chapter_end_hook}"
+                    _scene_summary += "\n请在本场景末尾自然地埋下这个钩子，作为本章收尾。"
+                _scene_target = _budget if _budget > 0 else target_words // _scene_count
+                # 前面已写内容作为上下文（取最后600字，避免膨胀）
                 _prior_ctx = ""
                 if _all_parts:
                     _written_so_far = "\n\n".join(_all_parts)
-                    _prior_ctx = f"### 本章已写内容（续写时保持连贯）\n{_written_so_far[-800:]}"
+                    _prior_ctx = f"### 本章已写内容（续写时直接接续，不要重复以上内容）\n{_written_so_far[-600:]}"
                 else:
                     _prior_ctx = prior_summaries
 
@@ -688,6 +710,17 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
                     _part = _title_pat.sub('', _part, count=1).strip()
+                # V7.10: 场景间去重 - 移除与上一个场景尾部重叠的段落
+                if _all_parts:
+                    _prev = _all_parts[-1]
+                    _merged = False
+                    for _overlap in range(min(300, len(_prev)), 49, -10):
+                        _tail = _prev[-_overlap:].strip()
+                        if _tail and _tail in _part:
+                            _cut = _part.index(_tail) + len(_tail)
+                            _part = _part[_cut:].strip()
+                            _merged = True
+                            break
                 _all_parts.append(_part)
                 _settlement = _result.settlement or _settlement
 
