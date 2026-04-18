@@ -3292,6 +3292,7 @@ function renderAuditResult(res) {
         <span style="margin-left:auto;font-size:11px;cursor:pointer">&#9660;</span>
       </div>
       <div style="${passed?'display:none':''}">
+        ${issues.length > 1 ? '<div style="padding:8px 12px;background:var(--bg-dark);border-radius:6px;margin-bottom:8px;font-size:12px;color:var(--text2)">💡 多个问题建议用「🔄 循环自动修订」一次性全部修复，逐个修复可能越修越多</div>' : ''}
         ${issues.map(iss => {
           const idx = issueIdx++;
           return `
@@ -3302,7 +3303,7 @@ function renderAuditResult(res) {
               <div style="color:var(--text2);margin-top:2px">${esc(iss.description||'')}</div>
               ${iss.suggestion?`<div style="color:var(--text3);margin-top:2px;font-style:italic">建议：${esc(iss.suggestion)}</div>`:''}
               ${iss.excerpt?`<div style="color:var(--text3);margin-top:4px;padding:6px;background:var(--bg-dark);border-radius:4px;font-size:11px">...${esc(iss.excerpt)}...</div>`:''}
-              <button class="btn btn-sm" style="margin-top:6px;font-size:10px" onclick="applyIssueFix(${idx})">&#10024; AI 修复此问题</button>
+              <button class="btn btn-sm" style="margin-top:6px;font-size:10px" onclick="applyIssueFix(${idx})" title="仅修复此问题。问题较多时建议用「循环自动修订」一次性全部修复">&#10024; AI 修复此问题</button>
             </div>
           </div>`;
         }).join('')}
@@ -3371,9 +3372,9 @@ async function doRevise() {
 async function doAutoReviseLoop() {
   const ch = parseInt(document.getElementById('audit-chapter')?.value);
   if (!ch) return toast('请选择章节', false);
-  toast('正在循环自动修订（最多3轮，约1-2分钟）...', 'loading');
+  toast('正在循环自动修订（最多5轮，约2-3分钟）...', 'loading');
   try {
-    const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=3`, {
+    const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=5`, {
       method: 'POST',
     });
     if (!res.ok) { toast('循环修订失败', false); return; }
