@@ -615,7 +615,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 
     # ── 7. 调用 WriterAgent ──
     from core.agents import WriterAgent
-    chapter_max_tokens = min(8192, max(2048, int(target_words * 1.5)))
+    chapter_max_tokens = min(8192, max(2048, int(target_words * 2.5)))
     llm = create_llm(max_tokens=chapter_max_tokens)
     writer = WriterAgent(llm, style_guide=style_guide, genre=genre)
 
