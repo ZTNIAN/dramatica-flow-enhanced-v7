@@ -305,7 +305,40 @@ async def three_layer_audit(book_id: str, req: ThreeLayerAuditReq):
             content, req.chapter, blueprint, truth_ctx, settlement,
             cross_thread_context="",
         )
-        return {"ok": True, "report": dc_to_dict(report), "chapter": req.chapter}
+        r = dc_to_dict(report)
+
+        # Reshape AuditReport → 3-layer format for frontend
+        LAYER_MAP = {
+            "文笔去AI化": "language", "对话质量": "language", "风格一致": "language", "场景构建": "language", "心理刻画": "language",
+            "逻辑自洽": "structure", "设定一致": "structure", "结构合理": "structure",
+            "人物OOC": "drama",
+        }
+        layers = {"language": {"passed": True, "issues": []}, "structure": {"passed": True, "issues": []}, "drama": {"passed": True, "issues": []}}
+        for iss in r.get("issues", []):
+            dim = iss.get("dimension", "")
+            lk = LAYER_MAP.get(dim, "language")
+            layers[lk]["issues"].append(iss)
+        for k in layers:
+            if any(i.get("severity") == "critical" for i in layers[k]["issues"]):
+                layers[k]["passed"] = False
+
+        resp = {
+            "ok": True,
+            "chapter": r.get("chapter_number", req.chapter),
+            "passed": r.get("passed", True),
+            "summary": r.get("overall_note", ""),
+            "layers": layers,
+            "dimension_scores": r.get("dimension_scores", {}),
+            "weighted_total": r.get("weighted_total", 0),
+            "redline_violations": r.get("redline_violations", []),
+        }
+
+        # Save audit result to disk
+        audit_dir = s.state_dir / "audits"
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        (audit_dir / f"audit_ch{req.chapter:04d}.json").write_text(json.dumps(resp, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        return resp
     except Exception as e:
         raise HTTPException(500, f"审计失败：{e}")
 
