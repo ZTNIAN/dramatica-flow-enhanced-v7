@@ -1695,3 +1695,61 @@ diff ./books/{书名}/chapters/chNNNN_draft.bak.md ./books/{书名}/chapters/chN
 3. **auto-revise-loop 的 Reviser 是全文修订**：它会重写整章，可能破坏场景比例。需要场景级约束。
 4. **v7.20-stable tag == 当前 main 的 HEAD**：GitHub 上 main 和 v7.20-stable 是同一 commit，本地有未提交修改 + 落后远程 35 个提交。
 5. **`git diff` 比 `git pull` 更安全**：先看差异，再决定要不要拉。
+
+
+---
+
+## 二十四、V7.23 锚定式修订（2026-04-20）
+
+### 问题背景
+
+auto-revise-loop 的 Reviser 会重写整章，导致：
+- 场景比例失衡（场景1膨胀到1957字、场景2压缩到266字，目标各1000字）
+- 节拍被压缩（节拍1.6 噩梦只剩3行元叙事）
+
+### 根因
+
+Reviser 拿到「这些问题需要修」+「全文」，但不知道：
+1. 每个场景的字数预算是多少
+2. 场景边界在哪里
+3. 哪些部分是好的、不该动
+
+### 解决方案：锚定式修订
+
+```
+1. 保存 .bak
+2. 按 ### 场景标题 拆分草稿为独立场景
+3. 从 detailed_outline 读取每个场景的 word_budget
+4. 根据 issues 的 location/description 定位到受影响的场景
+5. 只修订受影响的场景，传入该场景的字数预算
+6. 没问题的场景原样保留，一个字不动
+7. 重新拼装 + 全局字数截断
+```
+
+### 新增函数（writing.py）
+
+- `_parse_scenes_by_header(content)` — 按 `###` 标题拆分草稿
+- `_identify_affected_scenes(issues, scenes)` — 根据 issues 定位受影响场景
+- `_revise_scenes(content, issues, scenes, scene_budgets, reviser, s, chapter)` — 场景级修订
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `core/server/routers/writing.py` | auto-revise-loop 改为场景级修订；新增3个辅助函数 |
+
+### WSL 更新
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+f = 'core/server/routers/writing.py'
+url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+data = urllib.request.urlopen(url, timeout=30).read()
+with open(f, 'wb') as fh:
+    fh.write(data)
+print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
