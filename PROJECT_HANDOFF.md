@@ -1389,3 +1389,52 @@ print(f'OK: {len(data)} bytes')
 "
 # 重启 uvicorn
 ```
+
+## 二十三、V7.20-V7.22 修复（云服务器镜像调试 2026-04-19）
+
+### 背景
+
+环节四正文生成进入稳定阶段后，开始测试环节五（审计→修订）。发现修订阶段存在 4 个严重问题。
+
+### V7.20：正文字数控制优化
+
+**改动**：
+- per-scene max_tokens: 1.5x → 1.3x（源头限制输出量）
+- 场景截断容忍度: 1.2x → 1.0x（场景不超标）
+- 全局截断容忍度: 1.1x → 1.05x
+- prompt 字数铁律：「宁可少写100字，绝不能超！超字数=废稿。场景内换地点不加字数！」
+
+**结果**：第1章从 V7.19 的 2652 字降到 2499 字，6节拍全覆盖，节拍1.6（噩梦）不再丢失。
+
+**Release**: https://github.com/ZTNIAN/dramatica-flow-enhanced-v7/releases/tag/v7.20-stable
+
+### V7.21：修订阶段蓝图剥离
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 90 | writing.py | 修订后正文出现「写前蓝图」「写后结算表」 | writer.py 有4轮后处理剥离，但 reviser.py 和 writing.py 完全没有 | writing.py 新增 `_strip_blueprint()` 函数，4个修订出口统一调用 |
+| 91 | reviser.py | 修订时 LLM 把规划信息当正文输出 | prompt 和 system message 没有禁止输出规划信息 | prompt 新增「铁律：禁止输出规划信息」+ system message 新增同等约束 |
+
+### V7.22：审计→修订流程修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 92 | writing.py | 修订后用户 promote 的 final 被删除 | `final_path.unlink()` 主动删除 final | 删除该行，修订只更新 draft |
+| 93 | writing.py | 切换环节后审计结果为空（404） | auto-revise-loop 内部审计没持久化到文件 | 每轮审计后保存 audit_chXXXX.json |
+| 94 | writing.py | 终端看不到审计问题和修订内容 | 无日志输出 issues 和 change_log | 每轮输出 issues 列表 + change_log，日志标签 `[V7.22]` |
+
+### 根本问题：Reviser 全文重写导致越改越偏
+
+**现象**：auto-revise-loop 多轮修订后，正文从「调谐中心+异常注释」完全变成了「教堂+老K+坟场」，等于重写了一整章。
+
+**根因**：ReviserAgent 每次调用时传入全文 + 所有 issues，LLM 被要求「修订」但实际在「重写」。多轮重写累积漂移，每轮都在上一轮的基础上再改一遍，内容越来越偏离原文。
+
+**修复方向（待实现）**：
+1. 逐 issue 定位替换：用 excerpt 在原文中定位问题段落，只替换该段落
+2. 相似度校验：修订后对比原文相似度，低于 70% 则拒绝并回滚
+3. 单轮最大改动限制：一轮修订最多改 3 个 issue，超过则分轮处理
+4. prompt 改为 diff 模式：要求 LLM 输出 `---旧内容 +++新内容` 格式，后端做 patch
+
+**影响范围**：`core/agents/reviser.py` 的 `revise()` 方法 + `core/server/routers/writing.py` 的 auto-revise-loop
+
+**临时规避**：当前版本只跑 1 轮修订（max_rounds=1），手动检查后再决定是否跑第 2 轮。
