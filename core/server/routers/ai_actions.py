@@ -388,8 +388,10 @@ async def ai_generate_chapter_outlines(book_id: str):
 
 返回 JSON 数组。"""
     try:
-        _llm = create_llm(max_tokens=4096)
+        _llm = create_llm(max_tokens=8192)
+        logging.info(f"[V7.19] chapter-outlines: outline chars={len(json.dumps(outline, ensure_ascii=False))}, world_ctx chars={len(world_ctx)}, prompt chars={len(prompt)}")
         resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
+        logging.info(f"[V7.19] LLM response length={len(resp.content)} chars")
         import json as _json, re as _re
         _raw = resp.content.strip()
         _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
@@ -422,7 +424,19 @@ async def ai_generate_chapter_outlines(book_id: str):
         co_path.write_text(json.dumps(outlines, ensure_ascii=False, indent=2), encoding="utf-8")
         return {"ok": True, "outlines": outlines, "count": len(outlines)}
     except Exception as e:
-        raise HTTPException(500, f"生成章纲失败：{e}")
+        import traceback
+        logging.error(f"[V7.19] chapter-outlines 500: {type(e).__name__}: {e}")
+        logging.error(f"[V7.19] traceback:\n{traceback.format_exc()}")
+        # 打印 LLM 原始响应（如果可用）
+        try:
+            logging.error(f"[V7.19] raw LLM response (first 2000 chars):\n{resp.content[:2000]}")
+        except Exception:
+            pass
+        try:
+            logging.error(f"[V7.19] extracted _raw (first 2000 chars):\n{_raw[:2000]}")
+        except Exception:
+            pass
+        raise HTTPException(500, f"生成章纲失败：{type(e).__name__}: {e}")
 
 
 @router.post("/{book_id}/ai-generate/detailed-outline")
