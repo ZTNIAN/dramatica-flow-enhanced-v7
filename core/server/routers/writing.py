@@ -466,13 +466,34 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
     auditor = AuditorAgent(auditor_llm)
     reviser_llm = create_llm()
     reviser = ReviserAgent(reviser_llm)
+
+    # ── 从章纲构建 blueprint（与 three-layer-audit 一致，避免审计员拿不到参照标准）──
     blueprint = ArchitectBlueprint(
         core_conflict="", hooks_to_advance=[], hooks_to_plant=[],
         emotional_journey={}, chapter_end_hook="", pace_notes="",
         pov_character_id="",
         pre_write_checklist=PreWriteChecklist([], [], [], [], ""),
     )
-    truth_ctx = s.read_truth_bundle([TruthFileKey.CURRENT_STATE, TruthFileKey.PENDING_HOOKS])
+    _outline_path = s.state_dir / "chapter_outlines.json"
+    if _outline_path.exists():
+        try:
+            _outlines = json.loads(_outline_path.read_text(encoding="utf-8"))
+            for _co in _outlines:
+                if int(_co.get("chapter_number", 0)) == int(chapter):
+                    blueprint = ArchitectBlueprint(
+                        core_conflict=_co.get("summary", ""),
+                        hooks_to_advance=_co.get("hooks_to_advance", []),
+                        hooks_to_plant=_co.get("hooks_to_plant", []),
+                        emotional_journey=_co.get("emotional_arc", {}),
+                        chapter_end_hook=_co.get("chapter_end_hook", ""),
+                        pace_notes=_co.get("pace_notes", ""),
+                        pov_character_id=_co.get("pov_character_id", ""),
+                        pre_write_checklist=PreWriteChecklist([], [], [], [], ""),
+                    )
+                    break
+        except Exception:
+            pass
+    truth_ctx = s.read_truth_bundle([TruthFileKey.CURRENT_STATE, TruthFileKey.CHARACTER_MATRIX, TruthFileKey.PENDING_HOOKS])
     settlement = PostWriteSettlement([], [], [], [], [])
 
     # 读取当前内容（优先 draft，因为修订操作目标是 draft）

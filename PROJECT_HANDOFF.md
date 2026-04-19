@@ -1488,6 +1488,7 @@ print(f'OK: {len(data)} bytes')
 | 96 | `dramatica_flow_web_ui.html` | 点击「循环自动修订」→ 只弹一个 toast，不知道每轮改了什么、有什么问题 | `doAutoReviseLoop()` 只用 `toast()` 展示摘要，后端返回的 rounds/issues/changes 全部丢弃 | 在审计结果面板中渲染逐轮报告：每轮通过状态 + issues 列表 + changes 列表 |
 | 97 | `dramatica_flow_web_ui.html` | 审计环节→切到其他环节→再切回审计→审计结果为空 | `switchAuditTab('audit')` 没有触发 `loadSavedAudit()`，审计结果只在 `loadStep6()` 初始化时加载一次 | 在 `switchAuditTab` 中增加 `if (tab === 'audit') loadSavedAudit()` |
 | 98 | `writing.py` | auto-revise-loop 保存的审计结果，前端 `loadSavedAudit()` 加载后 `renderAuditResult()` 渲染失败（静默吞错） | `auto-revise-loop` 保存格式是 `{report: _report_dict}`，而 `renderAuditResult()` 需要 `{layers: {...}}`，格式不匹配 | `auto-revise-loop` 持久化时使用与 `three-layer-audit` 相同的 3-layer 格式 |
+| 99 | `writing.py` | auto-revise-loop 5轮修订全部失败，审计只报"缺写前蓝图/写后结算表/真相文件"，修订无实际改动 | `auto-revise-loop` 传给审计员的 blueprint 全为空（core_conflict=""、hooks_to_plant=[]、emotional_journey={}），审计员没有参照标准，只能抱怨"缺元数据"。Reviser 试图添加元信息 → `_strip_blueprint()` 删掉 → 死循环 | 从 `chapter_outlines.json` 读取章纲，构建真实 blueprint（与 `three-layer-audit` 逻辑一致）。同时 truth_bundle 增加 CHARACTER_MATRIX |
 
 ### V7.23 改动总表
 
@@ -1497,6 +1498,8 @@ print(f'OK: {len(data)} bytes')
 | 循环修订结果展示 | `dramatica_flow_web_ui.html` | 只弹 toast 摘要 | 审计面板渲染逐轮报告（issues + changes） |
 | 审计标签重载 | `dramatica_flow_web_ui.html` | 切回审计标签无操作 | 触发 `loadSavedAudit()` |
 | 审计结果格式 | `writing.py` | `{ok, chapter, passed, summary, report}` | `{ok, chapter, passed, summary, layers, dimension_scores, ...}`（3-layer 格式） |
+| auto-revise-loop blueprint | `writing.py` | 硬编码空 blueprint | 从 `chapter_outlines.json` 读取章纲构建 blueprint（与 three-layer-audit 一致） |
+| auto-revise-loop truth_ctx | `writing.py` | 只读 CURRENT_STATE + PENDING_HOOKS | 增加 CHARACTER_MATRIX（与 three-layer-audit 一致） |
 
 ### 用户工作流（修复后）
 
@@ -1511,13 +1514,13 @@ print(f'OK: {len(data)} bytes')
 
 ### WSL 更新方式
 
-本次改动 2 个文件：
+本次改动 1 个文件：
 
 ```bash
 cd ~/dramatica-flow-enhanced-v7
 python3 -c "
 import urllib.request
-for f in ['core/server/routers/writing.py', 'dramatica_flow_web_ui.html']:
+for f in ['core/server/routers/writing.py']:
     url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
     data = urllib.request.urlopen(url, timeout=30).read()
     with open(f, 'wb') as fh:
@@ -1527,10 +1530,86 @@ for f in ['core/server/routers/writing.py', 'dramatica_flow_web_ui.html']:
 # 重启 uvicorn
 ```
 
+> ⚠️ 如果你的 `dramatica_flow_web_ui.html` 还是旧版（只有一个「保存正文」按钮），也需要更新：
+> 把 `'dramatica_flow_web_ui.html'` 加到上面的 for f 列表里。
+
 ### 当前状态
 
 - ✅ 正文编辑：双按钮（保存草稿 / 保存为最终稿）
 - ✅ 循环自动修订：逐轮报告渲染在审计面板
 - ✅ 审计结果持久化：切环节不丢失
 - ✅ 审计结果格式统一：auto-revise-loop 与 three-layer-audit 格式一致
+- ✅ auto-revise-loop blueprint：从章纲读取，与 three-layer-audit 一致
 - ⏳ 待用户实测验证
+
+---
+
+## ⚠️ AI 操作规范（血的教训，不可再犯）
+
+> **2026-04-20 记录。以下错误导致用户浪费 1 小时调试，数据丢失风险，反复返工。**
+
+### 🚫 禁止行为清单
+
+#### 🔴 红线 1：改代码前必须读完所有相关文件
+- **错误**：改 `writing.py` 前没读 `auditor.py`、`reviser.py`、`writer.py`、`state/__init__.py`，不知道审计员的 prompt 结构、blueprint 参数含义、truth 文件读取逻辑
+- **后果**：提出的修复方案只改了审计结果格式（无关紧要），没发现真正的问题（blueprint 为空导致审计员报"缺元数据"）
+- **规则**：改任何代码前，必须先 `grep -rn` 追踪完整的调用链，读完链上每个文件
+
+#### 🔴 红线 2：必须读完项目交接文档再动手
+- **错误**：PROJECT_HANDOFF.md 1400+ 行，只扫了标题和 grep 了几个关键词，没读"坑"和"已知问题"章节
+- **后果**：文档第 1418 行已经写了"Reviser 全文重写导致越改越偏"的根本问题，我完全没看到，导致修复方向错误
+- **规则**：读 PROJECT_HANDOFF.md 的完整内容，特别关注：坑记录、已知问题、当前状态、失败案例
+
+#### 🔴 红线 3：不经过用户确认不能改代码和推送
+- **错误**：用户报了 3 个 bug，我直接改了代码、提交、推送，没有先分析原因和列出方案
+- **后果**：用户拿到的是我没理解清楚就改的代码，反而引入新问题（auto-revise-loop 死循环暴露）
+- **规则**：必须按四步走：①分析所有可能原因 → ②每种情况的修复方案+副作用 → ③推荐方案+理由 → ④等用户确认再动手
+
+#### 🔴 红线 4：不能用 urllib/git pull 覆盖用户本地文件
+- **错误**：给了 `git pull` 和 `git stash + git reset --hard` 命令，差点覆盖用户的 `.env`、`books/`、本地修改
+- **后果**：用户本地的 `reviser.py`、`writer.py`、`ai_actions.py`、`writing.py` 都有未提交的修改，差点全丢
+- **规则**：更新只用 urllib 下载**本次改动的具体文件**，绝不 `git pull` / `git reset --hard`。每次更新前问用户：你的本地有哪些未提交的修改？
+
+#### 🔴 红线 5：对比差异前不能假设"我的改动没影响"
+- **错误**：看到 `git diff` 只改了格式就下结论"不影响逻辑"，没考虑到用户本地版本和 GitHub 版本可能不同
+- **后果**：用户第一次测试能过、第二次过不了，我一开始完全无法解释，浪费了大量时间
+- **规则**：任何行为差异，先假设"可能是版本/状态差异"，检查 git stash、本地修改、文件内容差异
+
+### ✅ 正确操作流程
+
+```
+1. 用户报 bug → 先读完所有相关代码（含调用链上的每个文件）
+2. 读完 PROJECT_HANDOFF.md（全文，重点看坑和已知问题）
+3. 列出所有可能原因（情况1、情况2...）
+4. 每种情况的修复方案 + 副作用
+5. 推荐方案 + 为什么
+6. 等用户确认
+7. 改代码 → 本地测试 → 推送 → 告诉用户 urllib 更新命令
+8. 更新命令只包含本次改动的文件，绝不 git pull
+```
+
+### 📌 给用户的更新命令模板
+
+每次更新时，AI 必须提供：
+1. 改了哪几个文件（完整路径）
+2. 每个文件改了什么（一句话描述）
+3. urllib 更新命令（只下载这些文件）
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in [
+    # AI 在这里列出本次改动的文件
+]:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+---
+
