@@ -949,7 +949,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _scene_target = _budget if _budget > 0 else target_words // _scene_count
                 _beat_lines = [l for l in _beats.strip().split("\n") if l.strip().startswith("-")]
                 _total_beats = len(_beat_lines)
-                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。最后一个节拍必须完整展开，绝不能压缩或省略。字数约{_scene_target}字，不超过{_scene_target*1.2:.0f}字。"
+                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。最后一个节拍必须完整展开，绝不能压缩或省略。字数约{_scene_target}字，不超过{_scene_target*1.2:.0f}字。绝对不要输出 *** 或任何分隔符，你只负责写这一个场景的正文。"
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
                 # 不注入钩子到prompt，由后处理拼接
