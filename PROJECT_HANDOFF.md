@@ -1613,3 +1613,85 @@ for f in [
 
 ---
 
+
+
+---
+
+## 二十三、端到端调试方法论（2026-04-20 现场排查记录）
+
+> 本章记录本次对第1章端到端测试结果的完整排查流程，供后续 AI 对话快速定位问题。
+
+### 排查步骤清单
+
+当用户反馈「生成结果不对」时，按以下顺序排查：
+
+**Step 1：确认是代码问题还是数据问题**
+
+```
+git status                              # 本地修改了哪些文件
+git diff core/server/routers/ai_actions.py   # 关键文件的 diff
+git log --oneline origin/main...HEAD    # 本地落后远程多少提交
+```
+
+- 如果 `git diff` 无变化 → 问题在数据或 LLM 随机性
+- 如果 `git diff` 有变化 → 检查改动是否引入了回归
+
+**Step 2：验证数据层（章纲 + 细纲）**
+
+```
+# 章纲节拍数
+python3 -c "import json; data=json.loads(open('./books/{书名}/state/chapter_outlines.json').read()); ch=[c for c in data if c.get('chapter_number')==N][0]; print(f'节拍数: {len(ch.get("beats",[]))}')"
+
+# 细纲场景/节拍结构 + weight/word_budget
+python3 -c "import json; data=json.loads(open('./books/{书名}/state/detailed_outlines/chNNNN.json').read()); [print(f'场景{i+1}: weight={sc.get("weight","?")}, word_budget={sc.get("word_budget","?")}, beats={len(sc.get("beats",[]))}') for i,sc in enumerate(data.get('scenes',[]))]"
+```
+
+**Step 3：验证传给 writer 的 scene_summaries（正则匹配 + 字数分配）**
+
+writer.py 中 `_scene_budgets` 用正则 `^###\s+(.+?)（目标(\d+)字）` 从 scene_summaries 提取场景名和字数预算。如果格式不匹配，会 fallback 到均分，导致字数分配错误。
+
+```
+# 检查正则能否匹配所有场景
+python3 -c "
+import re
+for line in scene_summaries.split('
+'):
+    m = re.match(r'^###\s+(.+?)（目标(\d+)字）', line)
+    if m:
+        print(f'场景: {m.group(1)}, 预算: {m.group(2)}字')
+"
+```
+
+**Step 4：验证实际输出的场景字数分布**
+
+```
+python3 -c "
+from pathlib import Path
+content = Path('./books/{书名}/chapters/chNNNN_final.md').read_text(encoding='utf-8')
+# 手动定位场景分界点，分别计算每个场景的字数
+"
+```
+
+**Step 5：对比原始 draft vs auto-revise 后的版本（如有 .bak）**
+
+```
+diff ./books/{书名}/chapters/chNNNN_draft.bak.md ./books/{书名}/chapters/chNNNN_draft.md
+```
+
+### 本次排查发现的问题总结
+
+| # | 问题 | 根因 | 状态 |
+|---|------|------|------|
+| 1 | 节拍 1.6（噩梦）被压缩成元叙事 | auto-revise-loop 的 Reviser 重写整章，无场景字数约束 | 待修复 |
+| 2 | 场景1/场景2 字数严重失衡（1957/266 vs 目标1000/1000） | 同上，Reviser 自由发挥导致 | 待修复 |
+| 3 | Schema 校验失败导致循环提前终止 | `_AuditReportSchema.weighted_total: int` 太严格 | 待修复 |
+| 4 | Blueprint 伏笔列表为空 | 章纲 JSON 缺少 `hooks_to_advance`/`hooks_to_plant` | Warning，低优先级 |
+| 5 | 写后结算表为空 | `PostWriteSettlement([], [], [], [], [])` 硬编码空值 | Warning，低优先级 |
+
+### 关键教训
+
+1. **不能 `git pull`**：会覆盖 .env、books/、.venv/。用 urllib 逐文件下载。
+2. **先查数据再查代码**：多数问题根因在 chapter_outlines.json / detailed_outline 的结构，而非代码逻辑。
+3. **auto-revise-loop 的 Reviser 是全文修订**：它会重写整章，可能破坏场景比例。需要场景级约束。
+4. **v7.20-stable tag == 当前 main 的 HEAD**：GitHub 上 main 和 v7.20-stable 是同一 commit，本地有未提交修改 + 落后远程 35 个提交。
+5. **`git diff` 比 `git pull` 更安全**：先看差异，再决定要不要拉。
