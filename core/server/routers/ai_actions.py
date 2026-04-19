@@ -389,9 +389,9 @@ async def ai_generate_chapter_outlines(book_id: str):
 返回 JSON 数组。"""
     try:
         _llm = create_llm(max_tokens=8192)
-        logging.info(f"[V7.19] chapter-outlines: outline chars={len(json.dumps(outline, ensure_ascii=False))}, world_ctx chars={len(world_ctx)}, prompt chars={len(prompt)}")
+        logging.info(f"[V7.20] chapter-outlines: outline chars={len(json.dumps(outline, ensure_ascii=False))}, world_ctx chars={len(world_ctx)}, prompt chars={len(prompt)}")
         resp = await run_sync(_llm.complete, [LLMMessage(role="user", content=prompt)])
-        logging.info(f"[V7.19] LLM response length={len(resp.content)} chars")
+        logging.info(f"[V7.20] LLM response length={len(resp.content)} chars")
         import json as _json, re as _re
         _raw = resp.content.strip()
         _raw = _re.sub(r"^\s*```(?:json)?\s*", "", _raw, flags=_re.MULTILINE)
@@ -409,7 +409,7 @@ async def ai_generate_chapter_outlines(book_id: str):
         try:
             data = _json.loads(_raw)
         except _json.JSONDecodeError:
-            # [V7.19] 增强 JSON 补全：处理截断在字符串中间的情况
+            # [V7.20] 增强 JSON 补全：处理截断在字符串中间的情况
             _patched = _raw
             # 1) 检测是否在字符串内被截断（未闭合的引号）
             _in_str = False
@@ -423,7 +423,7 @@ async def ai_generate_chapter_outlines(book_id: str):
                     _in_str = not _in_str
             if _in_str:
                 _patched += '"'
-                logging.info("[V7.19] JSON patched: closed unclosed string")
+                logging.info("[V7.20] JSON patched: closed unclosed string")
             # 2) 补闭合括号/花括号
             _open_b = _patched.count("{")
             _close_b = _patched.count("}")
@@ -433,7 +433,7 @@ async def ai_generate_chapter_outlines(book_id: str):
                 _patched += "}" * (_open_b - _close_b)
             if _close_s < _open_s:
                 _patched += "]" * (_open_s - _close_s)
-            logging.info(f"[V7.19] JSON patched: brackets {{ {_open_b} }} {_close_b} [ {_open_s} ] {_close_s}, patched_len={len(_patched)}")
+            logging.info(f"[V7.20] JSON patched: brackets {{ {_open_b} }} {_close_b} [ {_open_s} ] {_close_s}, patched_len={len(_patched)}")
             data = _json.loads(_patched)
         outlines = data if isinstance(data, list) else data.get("outlines", data.get("chapters", []))
         co_path = s.state_dir / "chapter_outlines.json"
@@ -441,15 +441,15 @@ async def ai_generate_chapter_outlines(book_id: str):
         return {"ok": True, "outlines": outlines, "count": len(outlines)}
     except Exception as e:
         import traceback
-        logging.error(f"[V7.19] chapter-outlines 500: {type(e).__name__}: {e}")
-        logging.error(f"[V7.19] traceback:\n{traceback.format_exc()}")
+        logging.error(f"[V7.20] chapter-outlines 500: {type(e).__name__}: {e}")
+        logging.error(f"[V7.20] traceback:\n{traceback.format_exc()}")
         # 打印 LLM 原始响应（如果可用）
         try:
-            logging.error(f"[V7.19] raw LLM response (first 2000 chars):\n{resp.content[:2000]}")
+            logging.error(f"[V7.20] raw LLM response (first 2000 chars):\n{resp.content[:2000]}")
         except Exception:
             pass
         try:
-            logging.error(f"[V7.19] extracted _raw (first 2000 chars):\n{_raw[:2000]}")
+            logging.error(f"[V7.20] extracted _raw (first 2000 chars):\n{_raw[:2000]}")
         except Exception:
             pass
         raise HTTPException(500, f"生成章纲失败：{type(e).__name__}: {e}")
@@ -562,10 +562,10 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
                 raise
         data["chapter"] = req.chapter
 
-        # ── [V7.19] 场景数强制修正：确保不超过 2 个场景 ──
+        # ── [V7.20] 场景数强制修正：确保不超过 2 个场景 ──
         scenes = data.get("scenes", [])
         if len(scenes) > 2:
-            logging.warning(f"[V7.19] LLM generated {len(scenes)} scenes, enforcing max 2")
+            logging.warning(f"[V7.20] LLM generated {len(scenes)} scenes, enforcing max 2")
             # 保留场景 1，把场景 2..N 的 beats 合并到场景 2
             scene1 = scenes[0]
             scene2 = scenes[1]
@@ -586,7 +586,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
                     scene2["conflict"] = scene2.get("conflict", "") + "；" + extra_conflict
             data["scenes"] = [scene1, scene2]
             scenes = data["scenes"]
-            logging.info(f"[V7.19] Merged to {len(scenes)} scenes: scene1 has {len(scene1.get('beats',[]))} beats, scene2 has {len(scene2.get('beats',[]))} beats")
+            logging.info(f"[V7.20] Merged to {len(scenes)} scenes: scene1 has {len(scene1.get('beats',[]))} beats, scene2 has {len(scene2.get('beats',[]))} beats")
 
         # ── 场景字数归一化：按 weight 比例分配 target_words ──
         if scenes:
@@ -949,7 +949,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _scene_target = _budget if _budget > 0 else target_words // _scene_count
                 _beat_lines = [l for l in _beats.strip().split("\n") if l.strip().startswith("-")]
                 _total_beats = len(_beat_lines)
-                # [V7.19] 逐节拍字数分配：最后一个节拍占40%，其余均分60%
+                # [V7.20] 逐节拍字数分配：最后一个节拍占40%，其余均分60%
                 _beat_budgets = []
                 if _total_beats > 0:
                     _last_beat_words = max(200, int(_scene_target * 0.4))
@@ -960,7 +960,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         else:
                             _beat_budgets.append(_other_beats_words)
                 _beat_alloc = "，".join([f"节拍{_bi+1}={_beat_budgets[_bi]}字" for _bi in range(_total_beats)])
-                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。字数分配：{_beat_alloc}。最后一个节拍必须完整展开，绝不能压缩或省略。总字数不超过{_scene_target*1.2:.0f}字。绝对不要输出 *** 或任何分隔符，你只负责写这一个场景的正文。"
+                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。字数分配：{_beat_alloc}。最后一个节拍必须完整展开，绝不能压缩或省略。总字数不超过{_scene_target:.0f}字（宁可少写100字，绝不能超！超字数=废稿）。场景内换地点不加字数！2-3句话完成过渡即可。绝对不要输出 *** 或任何分隔符，你只负责写这一个场景的正文。"
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
                 # 不注入钩子到prompt，由后处理拼接
@@ -972,7 +972,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 elif _idx == 0:
                     _prior_ctx = prior_summaries
 
-                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 1.5)))
+                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 1.3)))
                 _scene_llm = create_llm(max_tokens=_scene_max_tokens)
                 _scene_writer = WriterAgent(_scene_llm, style_guide=style_guide, genre=genre)
 
@@ -990,7 +990,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 # ── 场景级字数截断：超过 budget×1.2 强制截断 ──
                 _raw_len = len(_part)
                 if _scene_target > 0:
-                    _max_scene_chars = int(_scene_target * 1.2)
+                    _max_scene_chars = int(_scene_target * 1.0)
                     if _raw_len > _max_scene_chars:
                         _cut = -1
                         # 优先按段落边界截断
@@ -1005,16 +1005,16 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
-                        logging.info(f"[V7.19] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
+                        logging.info(f"[V7.20] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
                     else:
-                        logging.info(f"[V7.19] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
+                        logging.info(f"[V7.20] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
                 else:
                     logging.info(f"[V7.14] Scene{_idx+1}: _scene_target=0, BUDGET={_budget}, raw={_raw_len}")
                 # 去掉非首个场景可能重复的章节标题
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
                     _part = _title_pat.sub('', _part, count=1).strip()
-                # [V7.19] 去掉 LLM 可能自行输出的 *** 分隔符
+                # [V7.20] 去掉 LLM 可能自行输出的 *** 分隔符
                 _part = _part.replace("***", "").strip()
                 # V7.11: 场景间去重 - 移除与上一个场景尾部重叠的段落（带安全保护）
                 if _all_parts and _part:
@@ -1038,9 +1038,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             settlement = _settlement
 
         # ═══ 全局后处理 ═══
-        logging.info(f"[V7.19] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.1)}")
+        logging.info(f"[V7.20] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.05)}")
         # 1. 字数截断
-        max_chars = int(target_words * 1.1)
+        max_chars = int(target_words * 1.05)
         if len(content) > max_chars:
             _lower = int(target_words * 0.5)
             _upper = len(content)
@@ -1057,7 +1057,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 content = content[:cut_pos+1].rstrip()
             else:
                 content = content[:max_chars]
-            logging.info(f"[V7.19] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
+            logging.info(f"[V7.20] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
         # 2. 结尾钩子后处理
         if _hook_text:
             _found = False
@@ -1072,7 +1072,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         _hp = _hp[len(_px):]
                         break
                 content = content.rstrip() + "\n\n" + _hp[:300]
-        logging.info(f"[V7.19] Final content: {len(content)} chars")
+        logging.info(f"[V7.20] Final content: {len(content)} chars")
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(settlement) if settlement else None}
