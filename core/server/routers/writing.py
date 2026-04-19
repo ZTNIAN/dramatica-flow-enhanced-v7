@@ -77,9 +77,16 @@ def _strip_blueprint(text: str) -> str:
     return content.strip()
 
 
-def _parse_scenes_by_header(content: str) -> list[dict]:
-    """按 ### 场景标题 拆分草稿为场景列表，保留原始结构"""
+def _parse_scenes(content: str, num_expected_scenes: int = 0) -> list[dict]:
+    """拆分草稿为场景列表。支持两种分隔方式：
+    1. ### 场景标题（原始生成保留标题的情况）
+    2. 连续3个以上空行（常见于拼装后的 draft，标题已被剥离）
+    
+    num_expected_scenes: 如果已知预期场景数，用于验证拆分结果
+    """
     import re as _re
+    
+    # 方式1：按 ### 标题拆分
     segments = _re.split(r'(?=^###\s+)', content, flags=_re.MULTILINE)
     scenes = []
     for seg in segments:
@@ -96,7 +103,55 @@ def _parse_scenes_by_header(content: str) -> list[dict]:
             scenes[-1]["full"] += "\n" + seg
         else:
             scenes.append({"header": "", "body": seg, "full": seg})
-    return scenes
+    
+    # 验证：如果方式1得到多场景且符合预期，直接返回
+    if len(scenes) > 1:
+        if num_expected_scenes == 0 or len(scenes) == num_expected_scenes:
+            logging.info(f"[V7.23] Parsed {len(scenes)} scenes by ### headers")
+            return scenes
+    
+    # 方式2：按连续空行（3个以上换行）拆分
+    # 先清理首尾空行
+    _content = content.strip()
+    # 用3个以上连续换行作为场景分隔符
+    segments2 = _re.split(r'\n{3,}', _content)
+    scenes2 = []
+    for seg in segments2:
+        seg = seg.strip()
+        if not seg:
+            continue
+        scenes2.append({"header": "", "body": seg, "full": seg})
+    
+    # 如果方式2得到的场景数更接近预期，使用方式2
+    if num_expected_scenes > 0:
+        if len(scenes2) == num_expected_scenes:
+            logging.info(f"[V7.23] Parsed {len(scenes2)} scenes by blank lines (expected {num_expected_scenes})")
+            return scenes2
+        elif len(scenes) == num_expected_scenes:
+            logging.info(f"[V7.23] Parsed {len(scenes)} scenes by ### headers (expected {num_expected_scenes})")
+            return scenes
+        else:
+            # 都不完全匹配，选更接近的
+            diff1 = abs(len(scenes) - num_expected_scenes)
+            diff2 = abs(len(scenes2) - num_expected_scenes)
+            if diff2 < diff1 and len(scenes2) > 1:
+                logging.info(f"[V7.23] Parsed {len(scenes2)} scenes by blank lines (closer to expected {num_expected_scenes})")
+                return scenes2
+            elif len(scenes) > 1:
+                logging.info(f"[V7.23] Parsed {len(scenes)} scenes by ### headers (closer to expected {num_expected_scenes})")
+                return scenes
+    else:
+        # 没有预期场景数，优先返回多场景的结果
+        if len(scenes2) > 1:
+            logging.info(f"[V7.23] Parsed {len(scenes2)} scenes by blank lines")
+            return scenes2
+        elif len(scenes) > 1:
+            logging.info(f"[V7.23] Parsed {len(scenes)} scenes by ### headers")
+            return scenes
+    
+    # 都无法拆分，返回全文作为一个场景
+    logging.info(f"[V7.23] Could not split into scenes, treating as single scene")
+    return [{"header": "", "body": content, "full": content}]
 
 
 def _identify_affected_scenes(issues, scenes: list[dict]) -> set[int]:
@@ -714,10 +769,10 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
 
         try:
             # 解析场景
-            scenes = _parse_scenes_by_header(content)
+            scenes = _parse_scenes(content, num_expected_scenes=len(scene_budgets))
             if len(scenes) <= 1:
                 # 无法拆分场景 → 降级为全文修订（原逻辑）
-                logging.info(f"[V7.23] Single scene or unparseable, falling back to full revision")
+                logging.info(f"[V7.23] Could not split scenes ({len(scenes)} detected, expected {len(scene_budgets)}), falling back to full revision")
                 result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
                 for _cl in result.change_log:
                     logging.info(f"[V7.23]   Change: {_cl}")
