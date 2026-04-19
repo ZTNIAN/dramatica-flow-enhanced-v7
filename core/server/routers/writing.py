@@ -77,6 +77,118 @@ def _strip_blueprint(text: str) -> str:
     return content.strip()
 
 
+def _parse_scenes_by_header(content: str) -> list[dict]:
+    """按 ### 场景标题 拆分草稿为场景列表，保留原始结构"""
+    import re as _re
+    segments = _re.split(r'(?=^###\s+)', content, flags=_re.MULTILINE)
+    scenes = []
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        m = _re.match(r'^###\s+(.+)', seg)
+        if m:
+            header_line = seg.split('\n')[0]
+            body = '\n'.join(seg.split('\n')[1:])
+            scenes.append({"header": header_line, "body": body, "full": seg})
+        elif scenes:
+            scenes[-1]["body"] += "\n" + seg
+            scenes[-1]["full"] += "\n" + seg
+        else:
+            scenes.append({"header": "", "body": seg, "full": seg})
+    return scenes
+
+
+def _identify_affected_scenes(issues, scenes: list[dict]) -> set[int]:
+    """根据 issues 的 location/description 判断哪些场景受影响"""
+    affected = set()
+    for issue in issues:
+        desc = (issue.description or "") + " " + (issue.suggestion or "") + " " + (issue.location or "")
+        matched = False
+        for idx, scene in enumerate(scenes):
+            header = scene.get("header", "")
+            # 提取场景名（去掉（目标XXX字））
+            import re as _re
+            m = _re.match(r'^###\s+(.+?)(?:（|$)', header)
+            scene_name = m.group(1) if m else header.replace("###", "").strip()
+            if scene_name and scene_name in desc:
+                affected.add(idx)
+                matched = True
+        if not matched:
+            # 大纲偏离/结尾钩子 → 影响最后场景
+            if any(kw in desc for kw in ["结尾", "章末", "钩子", "噩梦", "公寓", "梦境"]):
+                affected.add(len(scenes) - 1)
+            # 全局性问题（结算表/伏笔管理/真相文件）→ 标记所有场景
+            elif any(kw in desc for kw in ["结算表", "伏笔管理", "真相文件", "写后结算"]):
+                affected.update(range(len(scenes)))
+            else:
+                # 无法定位 → 默认最后一个场景
+                affected.add(len(scenes) - 1)
+    return affected
+
+
+async def _revise_scenes(content: str, issues, scenes: list[dict],
+                          scene_budgets: list[int], reviser, s, chapter) -> str:
+    """只修订受影响的场景，其余原样保留"""
+    affected = _identify_affected_scenes(issues, scenes)
+    if not affected:
+        return content
+
+    logging.info(f"[V7.23] Scene-aware revision: {len(affected)}/{len(scenes)} scenes affected")
+
+    from ..deps import run_sync
+    revised_scenes = []
+    for idx, scene in enumerate(scenes):
+        if idx not in affected:
+            revised_scenes.append(scene["full"])
+            logging.info(f"[V7.23]   Scene {idx+1}: KEEP (no issues)")
+            continue
+
+        budget = scene_budgets[idx] if idx < len(scene_budgets) else 2000
+        scene_text = scene["full"]
+
+        # 构造场景级 issues + 字数约束
+        from core.agents.auditor import AuditIssue as _AI
+        scene_issues = []
+        for i in issues:
+            scene_issues.append(_AI(
+                dimension=i.dimension, severity=i.severity,
+                description=i.description, location=i.location,
+                suggestion=i.suggestion, excerpt=i.excerpt,
+            ))
+
+        budget_instruction = (
+            f"\n\n## 字数约束（绝对遵守）\n"
+            f"本场景原文 {len(scene_text)} 字，修订后不得超过 {budget} 字。\n"
+            f"如果原文已经接近预算，只能删减不能增加。\n"
+            f"只修改问题涉及的句子或段落，其余内容一字不动原样输出。"
+        )
+
+        try:
+            result = await run_sync(
+                reviser.revise, scene_text, scene_issues, mode="spot-fix"
+            )
+            revised = result.content.strip()
+
+            # 场景级字数截断
+            if len(revised) > budget:
+                cut = revised.rfind("。", int(budget * 0.5), budget + 200)
+                if cut > int(budget * 0.5):
+                    revised = revised[:cut+1]
+                else:
+                    revised = revised[:budget]
+                logging.info(f"[V7.23]   Scene {idx+1}: REVISED+TRUNCATED {len(scene_text)} -> {len(revised)} (budget={budget})")
+            else:
+                logging.info(f"[V7.23]   Scene {idx+1}: REVISED {len(scene_text)} -> {len(revised)} (budget={budget})")
+
+            revised_scenes.append(revised)
+        except Exception as e:
+            logging.error(f"[V7.23]   Scene {idx+1}: revision failed ({e}), keeping original")
+            revised_scenes.append(scene["full"])
+
+    return "\n\n".join(revised_scenes)
+
+
 def _build_pipeline(s, llm=None):
     """构造 WritingPipeline 的公共逻辑（V6 修复）"""
     from core.pipeline import WritingPipeline, PipelineConfig
@@ -507,7 +619,27 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
     if draft_path.exists():
         _backup = s.chapter_dir / f"ch{chapter:04d}_draft.bak.md"
         _shutil.copy2(draft_path, _backup)
-        logging.info(f"[V7.22] Backed up draft to {_backup.name}")
+        logging.info(f"[V7.23] Backed up draft to {_backup.name}")
+
+    # 加载场景字数预算（从 detailed_outline）
+    scene_budgets = []
+    _do_path = s.state_dir / "detailed_outlines" / f"ch{chapter:04d}.json"
+    if _do_path.exists():
+        try:
+            _do = json.loads(_do_path.read_text(encoding="utf-8"))
+            for sc in _do.get("scenes", []):
+                scene_budgets.append(sc.get("word_budget", 1000))
+            logging.info(f"[V7.23] Scene budgets loaded: {scene_budgets}")
+        except Exception as e:
+            logging.warning(f"[V7.23] Failed to load scene budgets: {e}")
+    if not scene_budgets:
+        # fallback：均分
+        try:
+            cfg = s.read_config()
+            tw = cfg.get("target_words_per_chapter", 2000)
+        except Exception:
+            tw = 2000
+        scene_budgets = [tw // 2, tw // 2]
 
     rounds_log = []
     for round_num in range(1, max_rounds + 1):
@@ -521,7 +653,7 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
         passed = report.passed
         issue_count = len(report.issues)
 
-        # 记录每轮 issues 详情（用于前端展示）
+        # 记录每轮 issues 详情
         issues_detail = []
         for i in report.issues:
             issues_detail.append({
@@ -535,11 +667,10 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
             "issues": issues_detail,
         })
 
-        # 持久化审计结果（每轮都保存，确保前端刷新后能看到最新，使用与 three-layer-audit 相同的格式）
+        # 持久化审计结果
         audit_dir = s.state_dir / "audits"
         audit_dir.mkdir(exist_ok=True)
         _report_dict = dc_to_dict(report)
-        # Reshape to 3-layer format (same as three-layer-audit)
         _LAYER_MAP = {
             "文笔去AI化": "language", "对话质量": "language", "风格一致": "language", "场景构建": "language", "心理刻画": "language",
             "逻辑自洽": "structure", "设定一致": "structure", "结构合理": "structure",
@@ -563,17 +694,15 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
         }
         (audit_dir / f"audit_ch{chapter:04d}.json").write_text(
             json.dumps(_resp, ensure_ascii=False, indent=2), encoding="utf-8")
-        logging.info(f"[V7.22] Round {round_num}: {issue_count} issues, passed={passed}, score={report.weighted_total}")
-
-        # 日志输出每个 issue（调试可见性）
+        logging.info(f"[V7.23] Round {round_num}: {issue_count} issues, passed={passed}, score={report.weighted_total}")
         for i in report.issues:
-            logging.info(f"[V7.22]   [{i.severity}] {i.dimension}: {i.description[:100]}")
+            logging.info(f"[V7.23]   [{i.severity}] {i.dimension}: {i.description[:100]}")
 
         if passed:
-            logging.info(f"[V7.22] Audit passed at round {round_num}")
+            logging.info(f"[V7.23] Audit passed at round {round_num}")
             break
 
-        # Revision
+        # ═══ V7.23: 锚定式修订 — 只修受影响场景 ═══
         critical = [i for i in report.issues if i.severity == "critical"]
         if not critical:
             from core.agents.auditor import AuditIssue as _AI
@@ -584,18 +713,30 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
             forced_issues = report.issues
 
         try:
-            result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
-            # 日志输出 change_log
-            for _cl in result.change_log:
-                logging.info(f"[V7.22]   Change: {_cl}")
-            # 字数控制 + 蓝图剥离
+            # 解析场景
+            scenes = _parse_scenes_by_header(content)
+            if len(scenes) <= 1:
+                # 无法拆分场景 → 降级为全文修订（原逻辑）
+                logging.info(f"[V7.23] Single scene or unparseable, falling back to full revision")
+                result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
+                for _cl in result.change_log:
+                    logging.info(f"[V7.23]   Change: {_cl}")
+                revised = _strip_blueprint(result.content)
+            else:
+                # 场景级修订
+                logging.info(f"[V7.23] Scene-aware revision: {len(scenes)} scenes detected")
+                revised = await _revise_scenes(
+                    content, forced_issues, scenes, scene_budgets, reviser, s, chapter
+                )
+                revised = _strip_blueprint(revised)
+
+            # 全局字数控制
             try:
                 cfg = s.read_config()
                 target_words = cfg.get("target_words_per_chapter", 2000)
             except Exception:
                 target_words = 2000
             max_chars = int(target_words * 1.2)
-            revised = _strip_blueprint(result.content)
             if len(revised) > max_chars:
                 cut_pos = revised.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
                 if cut_pos > int(target_words * 0.8):
@@ -606,13 +747,13 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
                         revised = revised[:cut_pos+1]
                     else:
                         revised = revised[:max_chars]
+
             s.save_draft(chapter, revised)
-            content = revised  # 下一轮用修订后的内容
-            # 不删除 final — 修订只更新 draft，final 由用户手动确认
-            rounds_log[-1]["changes"] = result.change_log
+            content = revised
+            rounds_log[-1]["changes"] = ["scene-aware revision applied"]
         except Exception as e:
             rounds_log[-1]["error"] = f"修订失败: {e}"
-            logging.error(f"[V7.22] Round {round_num} revision failed: {e}")
+            logging.error(f"[V7.23] Round {round_num} revision failed: {e}", exc_info=True)
             break
 
     final_content = s.read_draft(chapter) or s.read_final(chapter)
