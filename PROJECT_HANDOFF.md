@@ -15,6 +15,41 @@
 
 ---
 
+## ⚠️ WSL 更新协议（必读）
+
+> **绝对不要 `git pull` 或 `git reset --hard`，会导致本地修改丢失（.env、已有书籍数据、本地配置等）。**
+
+**正确方式：只更新改动的文件，用 urllib 从 GitHub 下载覆盖：**
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in [
+    # ← 在这里填本次改动的文件列表，例如：
+    # 'core/server/routers/writing.py',
+    # 'dramatica_flow_web_ui.html',
+]:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+**每次更新时，我会列出具体改了哪几个文件，你照着填就行。**
+
+**为什么不能 git pull：**
+- `.env` 含 API Key，会被覆盖
+- `books/` 目录含已创建的书籍和写作数据，会被覆盖
+- `.venv/` 虚拟环境会冲突
+- `__pycache__/` 编译缓存会导致合并冲突
+- 之前试过 `git stash + git reset --hard`，结果丢了大量本地状态
+
+---
+
 ## 一、这是什么？
 
 **Dramatica-Flow Enhanced** 是一个 **AI 自动写小说系统**。你给它一句话设定，它帮你：
@@ -1438,3 +1473,64 @@ print(f'OK: {len(data)} bytes')
 **影响范围**：`core/agents/reviser.py` 的 `revise()` 方法 + `core/server/routers/writing.py` 的 auto-revise-loop
 
 **临时规避**：当前版本只跑 1 轮修订（max_rounds=1），手动检查后再决定是否跑第 2 轮。
+
+## 二十四、前端审计/修订流程修复（云服务器镜像调试 2026-04-20）
+
+### 背景
+
+环节五（审计→修订）在 V7.22 后端修复基础上，实测发现前端 3 个交互问题 + 后端 1 个格式问题。
+
+### BUG 清单
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 95 | `dramatica_flow_web_ui.html` | 正文编辑→点击「保存正文」→前端无变化，草稿没有变成最终稿 | `saveEditedContent(kind)` 传的是加载时的 kind（draft），永远只保存草稿，没有"升级为最终稿"的入口 | 拆分为两个按钮：「保存草稿」(kind=draft) + 「保存为最终稿」(kind=final) |
+| 96 | `dramatica_flow_web_ui.html` | 点击「循环自动修订」→ 只弹一个 toast，不知道每轮改了什么、有什么问题 | `doAutoReviseLoop()` 只用 `toast()` 展示摘要，后端返回的 rounds/issues/changes 全部丢弃 | 在审计结果面板中渲染逐轮报告：每轮通过状态 + issues 列表 + changes 列表 |
+| 97 | `dramatica_flow_web_ui.html` | 审计环节→切到其他环节→再切回审计→审计结果为空 | `switchAuditTab('audit')` 没有触发 `loadSavedAudit()`，审计结果只在 `loadStep6()` 初始化时加载一次 | 在 `switchAuditTab` 中增加 `if (tab === 'audit') loadSavedAudit()` |
+| 98 | `writing.py` | auto-revise-loop 保存的审计结果，前端 `loadSavedAudit()` 加载后 `renderAuditResult()` 渲染失败（静默吞错） | `auto-revise-loop` 保存格式是 `{report: _report_dict}`，而 `renderAuditResult()` 需要 `{layers: {...}}`，格式不匹配 | `auto-revise-loop` 持久化时使用与 `three-layer-audit` 相同的 3-layer 格式 |
+
+### V7.23 改动总表
+
+| 改动 | 文件 | 之前 | 之后 |
+|------|------|------|------|
+| 正文编辑按钮 | `dramatica_flow_web_ui.html` | 单按钮「保存正文」传 `kind=${res.kind}` | 双按钮：「保存草稿」(draft) + 「保存为最终稿」(final) |
+| 循环修订结果展示 | `dramatica_flow_web_ui.html` | 只弹 toast 摘要 | 审计面板渲染逐轮报告（issues + changes） |
+| 审计标签重载 | `dramatica_flow_web_ui.html` | 切回审计标签无操作 | 触发 `loadSavedAudit()` |
+| 审计结果格式 | `writing.py` | `{ok, chapter, passed, summary, report}` | `{ok, chapter, passed, summary, layers, dimension_scores, ...}`（3-layer 格式） |
+
+### 用户工作流（修复后）
+
+```
+1. 生成草稿
+2. 正文编辑 → 点「保存为最终稿」→ 初始草稿存为 final（快照）
+3. 运行审计 → 看到审计结果
+4. 循环自动修订 → 审计面板显示每轮变化
+5. 切到其他环节再切回审计 → 审计结果还在
+6. 对比 final（初始）vs draft（修订后）→ 看效果
+```
+
+### WSL 更新方式
+
+本次改动 2 个文件：
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in ['core/server/routers/writing.py', 'dramatica_flow_web_ui.html']:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+### 当前状态
+
+- ✅ 正文编辑：双按钮（保存草稿 / 保存为最终稿）
+- ✅ 循环自动修订：逐轮报告渲染在审计面板
+- ✅ 审计结果持久化：切环节不丢失
+- ✅ 审计结果格式统一：auto-revise-loop 与 three-layer-audit 格式一致
+- ⏳ 待用户实测验证
