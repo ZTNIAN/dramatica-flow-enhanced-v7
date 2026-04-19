@@ -24,6 +24,59 @@ from ..deps import (
 router = APIRouter(prefix="/api/books", tags=["writing"])
 
 
+def _strip_blueprint(text: str) -> str:
+    """剥离修订后 LLM 可能混入的蓝图/元信息（与 writer.py 后处理一致）"""
+    import re as _re
+    content = text
+    # 第1轮：删除 "写前蓝图" 等标题段落
+    content = _re.sub(
+        r'(?:^|\n)#{1,3}\s*(?:写前蓝图|写作蓝图|章节大纲|章节细纲)[\s\S]*?(?=\n#{1,3}\s|\n键盘|\n【|\n　|\n[A-Z\u4e00-\u9fff]{2,})',
+        '', content, flags=_re.MULTILINE
+    ).strip()
+    # 第2轮：删除元叙述引用
+    content = _re.sub(
+        r'(?:^|\n)(?:但是)?(?:章节大纲|章节细纲|大纲|细纲|环节[一二三四五六七八九十]|细章)[^\n]{0,20}里写着[：:][\s\S]*?(?=\n\n|\Z)',
+        '', content, flags=_re.MULTILINE
+    ).strip()
+    # 第3轮：删除细纲格式内容
+    for _pat in [
+        r'(?:^|\n)(?:细纲|详细大纲|场景拆分)[^\n]*',
+        r'(?:^|\n)\s*(?:目标|冲突|节拍|埋伏笔|结尾钩子)\s*[：:].*',
+        r'(?:^|\n)\s*\*\s*(?:目标|冲突|节拍|埋伏笔|结尾钩子)\s*[：:].*',
+        r'(?:^|\n)编辑\s*$',
+        r'(?:^|\n)收起/展开\s*$',
+        r'(?:^|\n)###\s*写后结算表[\s\S]*?(?=\n---|\n#{1,3}|\Z)',
+        r'(?:^|\n)###\s*核心任务完成状态[\s\S]*?(?=\n---|\n#{1,3}|\Z)',
+        r'(?:^|\n)\*\*\s*(?:新开伏笔|闭合.*伏笔|角色状态变化|与蓝图偏差)\s*\*\*[\s\S]*?(?=\n\n|\Z)',
+    ]:
+        content = _re.sub(_pat, '', content, flags=_re.MULTILINE)
+    # 第4轮：如果 "核心冲突" 和 "情感旅程" 同时出现在前500字，截掉
+    if '核心冲突' in content[:500] and '情感旅程' in content[:500]:
+        _lines = content.split('\n')
+        _cut = 0
+        for _i, _l in enumerate(_lines):
+            _lstrip = _l.strip()
+            if _lstrip.startswith('**核心冲突') or _lstrip.startswith('* **核心冲突'):
+                _start = _i
+                for _j in range(_i-1, max(_i-5, -1), -1):
+                    if _lines[_j].strip().startswith('#') or not _lines[_j].strip():
+                        _start = _j
+                        break
+                _end = _i
+                for _j in range(_i+1, min(_i+30, len(_lines))):
+                    if _lines[_j].strip() == '' and _j > _i + 3:
+                        _end = _j + 1
+                        break
+                    if any(kw in _lines[_j] for kw in ['键盘声', '屏幕', '他', '她', '门', '走廊']):
+                        _end = _j
+                        break
+                _cut = len('\n'.join(_lines[:_start]))
+                break
+        if _cut > 0:
+            content = content[_cut:].lstrip('\n')
+    return content.strip()
+
+
 def _build_pipeline(s, llm=None):
     """构造 WritingPipeline 的公共逻辑（V6 修复）"""
     from core.pipeline import WritingPipeline, PipelineConfig
@@ -374,14 +427,14 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
         report = await run_sync(auditor.audit_chapter, content, chapter, blueprint, truth_ctx, settlement,
                                  cross_thread_context="")
         result = await run_sync(reviser.revise, content, report.issues, mode)
-        # 字数控制
+        # 字数控制 + 蓝图剥离
         try:
             cfg = s.read_config()
             target_words = cfg.get("target_words_per_chapter", 2000)
         except Exception:
             target_words = 2000
         max_chars = int(target_words * 1.2)
-        revised = result.content
+        revised = _strip_blueprint(result.content)
         if len(revised) > max_chars:
             cut_pos = revised.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
             if cut_pos > int(target_words * 0.8):
@@ -458,14 +511,14 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
 
         try:
             result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
-            # 字数控制
+            # 字数控制 + 蓝图剥离
             try:
                 cfg = s.read_config()
                 target_words = cfg.get("target_words_per_chapter", 2000)
             except Exception:
                 target_words = 2000
             max_chars = int(target_words * 1.2)
-            revised = result.content
+            revised = _strip_blueprint(result.content)
             if len(revised) > max_chars:
                 cut_pos = revised.rfind("\n\n", int(target_words * 0.8), max_chars + 200)
                 if cut_pos > int(target_words * 0.8):
@@ -540,14 +593,14 @@ async def ai_rewrite_segment(book_id: str, req: SegmentRewriteReq):
                                      description=instruction, suggestion=instruction)]
             result = await run_sync(reviser.revise, original, fake_issues, mode="spot-fix")
             pos = content.find(original)
-            new_content = content[:pos] + result.content + content[pos + len(original):]
+            new_content = content[:pos] + _strip_blueprint(result.content) + content[pos + len(original):]
         else:
             # Audit "AI 修复此问题": pass instruction as critical issue for guided revision
             from core.agents.auditor import AuditIssue
             fake_issues = [AuditIssue(dimension="综合", severity="critical",
                                      description=instruction, suggestion=instruction)]
             result = await run_sync(reviser.revise, content, fake_issues, mode="spot-fix")
-            new_content = result.content
+            new_content = _strip_blueprint(result.content)
 
         # 后处理：字数控制，不超过目标120%
         try:
