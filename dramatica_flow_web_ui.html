@@ -2791,6 +2791,7 @@ function switchAuditTab(tab, el) {
   document.getElementById('token-panel').style.display = tab === 'token' ? '' : 'none';
   if (tab === 'story') loadStoryData();
   if (tab === 'edit') loadAuditChapterText();
+  if (tab === 'audit') loadSavedAudit();
   if (tab === 'dashboard') loadQualityDashboard();
   if (tab === 'kb') loadKBStats();
   if (tab === 'agents') loadAgentPerformance();
@@ -2971,7 +2972,8 @@ async function loadAuditChapterText() {
         <div style="font-size:12px;color:var(--text3);margin-bottom:8px">可直接编辑下方正文，也可选中段落用左侧 AI 修改</div>
         <textarea id="chapter-text-body" style="width:100%;min-height:400px;max-height:600px;padding:12px;background:var(--bg-dark);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.8;color:var(--text);resize:vertical;font-family:inherit">${esc(res.content)}</textarea>
         <div style="display:flex;gap:8px;margin-top:10px">
-          <button class="btn btn-sm btn-success" onclick="saveEditedContent('${res.kind}')">&#128190; 保存正文</button>
+          <button class="btn btn-sm" onclick="saveEditedContent('draft')">&#128190; 保存草稿</button>
+          <button class="btn btn-sm btn-success" onclick="saveEditedContent('final')">&#9989; 保存为最终稿</button>
           <span id="edit-save-status" style="font-size:11px;color:var(--text3);line-height:28px"></span>
         </div>
       </div>`;
@@ -3378,26 +3380,53 @@ async function doAutoReviseLoop() {
   const ch = parseInt(document.getElementById('audit-chapter')?.value);
   if (!ch) return toast('请选择章节', false);
   toast('正在循环自动修订（最多5轮，约2-3分钟）...', 'loading');
+  const panel = document.getElementById('audit-result-panel');
+  panel.innerHTML = '<div class="loading" style="padding:16px">循环自动修订中，请等待（约2-3分钟）...</div>';
   try {
     const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=5`, {
       method: 'POST',
     });
-    if (!res.ok) { toast('循环修订失败', false); return; }
+    if (!res.ok) { toast('循环修订失败', false); panel.innerHTML='<div class="error">循环修订失败</div>'; return; }
     const rounds = res.rounds || [];
-    let summary = `共 ${res.total_rounds} 轮`;
-    if (res.final_passed) {
-      summary += '，审计通过 ✅';
-    } else {
-      summary += `，仍有问题（最后一轮 ${rounds[rounds.length-1]?.issues_count || '?'} 个）`;
+    // 渲染详细的逐轮结果
+    let html = `<div class="card">
+      <div class="card-header">&#128260; 循环自动修订报告 — 第${ch}章 <span style="font-size:12px;color:var(--text3);margin-left:8px">共 ${res.total_rounds} 轮 ${res.final_passed ? '· ✅ 审计通过' : '· ⚠️ 仍有问题'}</span></div>`;
+    for (const r of rounds) {
+      const rColor = r.passed ? 'var(--green)' : 'var(--red)';
+      html += `<div style="padding:10px 14px;margin-bottom:8px;border-left:3px solid ${rColor};background:var(--bg-dark);border-radius:0 6px 6px 0">
+        <div style="font-weight:600;font-size:13px;color:${rColor}">第${r.round}轮 ${r.passed ? '✅ 通过' : '❌ 未通过'}（${r.issues_count||0} 个问题${r.weighted_total ? '，得分 '+r.weighted_total : ''}）</div>`;
+      // 显示本轮 issues
+      if (r.issues && r.issues.length) {
+        html += '<div style="margin-top:6px">';
+        for (const iss of r.issues) {
+          const sevColor = iss.severity === 'critical' ? 'var(--red)' : 'var(--yellow)';
+          html += `<div style="margin-bottom:4px;font-size:12px"><span style="color:${sevColor};font-weight:600">[${iss.severity==='critical'?'严重':'警告'}]</span> <span style="color:var(--text2)">${esc(iss.dimension||'')}: ${esc(iss.description||'')}</span></div>`;
+        }
+        html += '</div>';
+      }
+      // 显示本轮修订改动
+      if (r.changes && r.changes.length) {
+        html += '<div style="margin-top:6px;padding-left:12px;border-left:2px solid var(--green)">';
+        for (const chg of r.changes) {
+          html += `<div style="font-size:12px;color:var(--green);margin-bottom:2px">✏️ ${esc(chg)}</div>`;
+        }
+        html += '</div>';
+      }
+      if (r.error) {
+        html += `<div style="margin-top:4px;font-size:12px;color:var(--red)">⚠️ ${esc(r.error)}</div>`;
+      }
+      html += '</div>';
     }
-    rounds.forEach(r => {
-      summary += `\n第${r.round}轮: ${r.passed ? '✅通过' : '❌' + (r.issues_count||0) + '个问题'}`;
-    });
+    html += '</div>';
+    panel.innerHTML = html;
+    // Toast 摘要
+    let summary = `共 ${res.total_rounds} 轮`;
+    summary += res.final_passed ? '，审计通过 ✅' : `，仍有问题`;
     toast(summary, res.final_passed);
     await loadBookData();
-    // Re-run audit to show final result
-    if (typeof runThreeLayerAudit === 'function') runThreeLayerAudit();
-  } catch (e) { toast('循环修订失败: ' + e.message, false); }
+    // 加载最终的审计结果
+    loadSavedAudit();
+  } catch (e) { toast('循环修订失败: ' + e.message, false); panel.innerHTML=`<div class="error">${esc(e.message)}</div>`; }
 }
 
 // ── Step 7: 导出 ──────────────────────────────────────────────────────────

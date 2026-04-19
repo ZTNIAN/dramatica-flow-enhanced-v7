@@ -514,14 +514,34 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
             "issues": issues_detail,
         })
 
-        # 持久化审计结果（每轮都保存，确保前端刷新后能看到最新）
+        # 持久化审计结果（每轮都保存，确保前端刷新后能看到最新，使用与 three-layer-audit 相同的格式）
         audit_dir = s.state_dir / "audits"
         audit_dir.mkdir(exist_ok=True)
         _report_dict = dc_to_dict(report)
+        # Reshape to 3-layer format (same as three-layer-audit)
+        _LAYER_MAP = {
+            "文笔去AI化": "language", "对话质量": "language", "风格一致": "language", "场景构建": "language", "心理刻画": "language",
+            "逻辑自洽": "structure", "设定一致": "structure", "结构合理": "structure",
+            "人物OOC": "drama",
+        }
+        _layers = {"language": {"passed": True, "issues": []}, "structure": {"passed": True, "issues": []}, "drama": {"passed": True, "issues": []}}
+        for _iss in _report_dict.get("issues", []):
+            _dim = _iss.get("dimension", "")
+            _lk = _LAYER_MAP.get(_dim, "language")
+            _layers[_lk]["issues"].append(_iss)
+        for _k in _layers:
+            if any(_i.get("severity") == "critical" for _i in _layers[_k]["issues"]):
+                _layers[_k]["passed"] = False
+        _resp = {
+            "ok": True, "chapter": chapter, "passed": passed,
+            "summary": f"Round {round_num}: {issue_count} issues, score={report.weighted_total}",
+            "layers": _layers,
+            "dimension_scores": _report_dict.get("dimension_scores", {}),
+            "weighted_total": _report_dict.get("weighted_total", 0),
+            "redline_violations": _report_dict.get("redline_violations", []),
+        }
         (audit_dir / f"audit_ch{chapter:04d}.json").write_text(
-            json.dumps({"ok": True, "chapter": chapter, "passed": passed,
-                        "summary": f"Round {round_num}: {issue_count} issues, score={report.weighted_total}",
-                        "report": _report_dict}, ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps(_resp, ensure_ascii=False, indent=2), encoding="utf-8")
         logging.info(f"[V7.22] Round {round_num}: {issue_count} issues, passed={passed}, score={report.weighted_total}")
 
         # 日志输出每个 issue（调试可见性）
