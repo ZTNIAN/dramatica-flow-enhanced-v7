@@ -475,12 +475,21 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
     truth_ctx = s.read_truth_bundle([TruthFileKey.CURRENT_STATE, TruthFileKey.PENDING_HOOKS])
     settlement = PostWriteSettlement([], [], [], [], [])
 
+    # 读取当前内容（优先 draft，因为修订操作目标是 draft）
+    content = s.read_draft(chapter) or s.read_final(chapter)
+    if not content:
+        raise HTTPException(404, f"第 {chapter} 章不存在")
+
+    # 修订前备份（不删 final，只备份 draft）
+    import shutil as _shutil
+    draft_path = s.chapter_dir / f"ch{chapter:04d}_draft.md"
+    if draft_path.exists():
+        _backup = s.chapter_dir / f"ch{chapter:04d}_draft.bak.md"
+        _shutil.copy2(draft_path, _backup)
+        logging.info(f"[V7.22] Backed up draft to {_backup.name}")
+
     rounds_log = []
     for round_num in range(1, max_rounds + 1):
-        content = s.read_final(chapter) or s.read_draft(chapter)
-        if not content:
-            raise HTTPException(404, f"第 {chapter} 章不存在")
-
         try:
             report = await run_sync(auditor.audit_chapter, content, chapter, blueprint, truth_ctx, settlement,
                                      cross_thread_context="")
@@ -490,18 +499,42 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
 
         passed = report.passed
         issue_count = len(report.issues)
+
+        # 记录每轮 issues 详情（用于前端展示）
+        issues_detail = []
+        for i in report.issues:
+            issues_detail.append({
+                "severity": i.severity, "dimension": i.dimension,
+                "description": i.description, "location": i.location or "",
+                "suggestion": i.suggestion or "",
+            })
         rounds_log.append({
             "round": round_num, "passed": passed,
             "issues_count": issue_count, "weighted_total": report.weighted_total,
+            "issues": issues_detail,
         })
 
+        # 持久化审计结果（每轮都保存，确保前端刷新后能看到最新）
+        audit_dir = s.state_dir / "audits"
+        audit_dir.mkdir(exist_ok=True)
+        _report_dict = dc_to_dict(report)
+        (audit_dir / f"audit_ch{chapter:04d}.json").write_text(
+            json.dumps({"ok": True, "chapter": chapter, "passed": passed,
+                        "summary": f"Round {round_num}: {issue_count} issues, score={report.weighted_total}",
+                        "report": _report_dict}, ensure_ascii=False, indent=2), encoding="utf-8")
+        logging.info(f"[V7.22] Round {round_num}: {issue_count} issues, passed={passed}, score={report.weighted_total}")
+
+        # 日志输出每个 issue（调试可见性）
+        for i in report.issues:
+            logging.info(f"[V7.22]   [{i.severity}] {i.dimension}: {i.description[:100]}")
+
         if passed:
+            logging.info(f"[V7.22] Audit passed at round {round_num}")
             break
 
         # Revision
         critical = [i for i in report.issues if i.severity == "critical"]
         if not critical:
-            # Force warnings to critical so reviser processes them
             from core.agents.auditor import AuditIssue as _AI
             forced_issues = [_AI(dimension=i.dimension, severity="critical",
                                  description=i.description, location=i.location,
@@ -511,6 +544,9 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
 
         try:
             result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
+            # 日志输出 change_log
+            for _cl in result.change_log:
+                logging.info(f"[V7.22]   Change: {_cl}")
             # 字数控制 + 蓝图剥离
             try:
                 cfg = s.read_config()
@@ -530,16 +566,15 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
                     else:
                         revised = revised[:max_chars]
             s.save_draft(chapter, revised)
-            # 每轮修订后删掉 final，最后一轮结果需要用户手动确认
-            final_path = s.chapter_dir / f"ch{chapter:04d}_final.md"
-            if final_path.exists():
-                final_path.unlink()
+            content = revised  # 下一轮用修订后的内容
+            # 不删除 final — 修订只更新 draft，final 由用户手动确认
             rounds_log[-1]["changes"] = result.change_log
         except Exception as e:
             rounds_log[-1]["error"] = f"修订失败: {e}"
+            logging.error(f"[V7.22] Round {round_num} revision failed: {e}")
             break
 
-    final_content = s.read_final(chapter) or s.read_draft(chapter)
+    final_content = s.read_draft(chapter) or s.read_final(chapter)
     return {"ok": True, "rounds": rounds_log, "total_rounds": len(rounds_log),
             "final_passed": rounds_log[-1].get("passed", False) if rounds_log else False}
 
