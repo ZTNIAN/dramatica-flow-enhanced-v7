@@ -409,15 +409,31 @@ async def ai_generate_chapter_outlines(book_id: str):
         try:
             data = _json.loads(_raw)
         except _json.JSONDecodeError:
-            _open_b = _raw.count("{")
-            _close_b = _raw.count("}")
-            _open_s = _raw.count("[")
-            _close_s = _raw.count("]")
+            # [V7.19] 增强 JSON 补全：处理截断在字符串中间的情况
             _patched = _raw
-            if _close_s < _open_s:
-                _patched += "]" * (_open_s - _close_s)
+            # 1) 检测是否在字符串内被截断（未闭合的引号）
+            _in_str = False
+            _esc = False
+            for _ch in _raw:
+                if _esc:
+                    _esc = False
+                elif _ch == '\\':
+                    _esc = True
+                elif _ch == '"':
+                    _in_str = not _in_str
+            if _in_str:
+                _patched += '"'
+                logging.info("[V7.19] JSON patched: closed unclosed string")
+            # 2) 补闭合括号/花括号
+            _open_b = _patched.count("{")
+            _close_b = _patched.count("}")
+            _open_s = _patched.count("[")
+            _close_s = _patched.count("]")
             if _close_b < _open_b:
                 _patched += "}" * (_open_b - _close_b)
+            if _close_s < _open_s:
+                _patched += "]" * (_open_s - _close_s)
+            logging.info(f"[V7.19] JSON patched: brackets {{ {_open_b} }} {_close_b} [ {_open_s} ] {_close_s}, patched_len={len(_patched)}")
             data = _json.loads(_patched)
         outlines = data if isinstance(data, list) else data.get("outlines", data.get("chapters", []))
         co_path = s.state_dir / "chapter_outlines.json"
