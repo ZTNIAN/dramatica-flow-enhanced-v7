@@ -961,7 +961,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 elif _idx == 0:
                     _prior_ctx = prior_summaries
 
-                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 2.0)))
+                _scene_max_tokens = min(8192, max(2048, int(_scene_target * 1.5)))
                 _scene_llm = create_llm(max_tokens=_scene_max_tokens)
                 _scene_writer = WriterAgent(_scene_llm, style_guide=style_guide, genre=genre)
 
@@ -1003,6 +1003,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 if _idx > 0:
                     _title_pat = re.compile(r'^#\s*第\d+章[^\n]*\n*', re.MULTILINE)
                     _part = _title_pat.sub('', _part, count=1).strip()
+                # [V7.19] 去掉 LLM 可能自行输出的 *** 分隔符
+                _part = _part.replace("***", "").strip()
                 # V7.11: 场景间去重 - 移除与上一个场景尾部重叠的段落（带安全保护）
                 if _all_parts and _part:
                     _prev = _all_parts[-1]
