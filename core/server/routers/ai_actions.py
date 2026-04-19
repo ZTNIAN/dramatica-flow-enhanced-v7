@@ -949,7 +949,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 _scene_target = _budget if _budget > 0 else target_words // _scene_count
                 _beat_lines = [l for l in _beats.strip().split("\n") if l.strip().startswith("-")]
                 _total_beats = len(_beat_lines)
-                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。字数约{_scene_target}字，不超过{_scene_target*1.2:.0f}字。"
+                _scene_summary += f"\n\n【强制要求】本场景共{_total_beats}个节拍，必须逐一展开写成小说正文，不能跳过任何节拍。字数约{_scene_target}字，不超过{_scene_target*1.1:.0f}字。宁可少写不要超。"
                 if _extra:
                     _scene_summary += f"\n\n【本场景要求】\n{_extra}"
                 # 不注入钩子到prompt，由后处理拼接
@@ -976,10 +976,10 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     emotional_arcs=emotional_arcs,
                 )
                 _part = _result.content.strip()
-                # ── 场景级字数截断：超过 budget×1.3 强制截断 ──
+                # ── 场景级字数截断：超过 budget×1.1 强制截断 ──
                 _raw_len = len(_part)
                 if _scene_target > 0:
-                    _max_scene_chars = int(_scene_target * 1.3)
+                    _max_scene_chars = int(_scene_target * 1.1)
                     if _raw_len > _max_scene_chars:
                         _cut = -1
                         # 优先按段落边界截断
@@ -994,9 +994,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             _part = _part[:_cut+1]
                         else:
                             _part = _part[:_max_scene_chars]
-                        logging.info(f"[V7.18] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
+                        logging.info(f"[V7.19] Scene{_idx+1} TRUNCATED: {_raw_len} -> {len(_part)} (target={_scene_target}, max={_max_scene_chars})")
                     else:
-                        logging.info(f"[V7.18] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
+                        logging.info(f"[V7.19] Scene{_idx+1} OK: {_raw_len} <= {_max_scene_chars} (target={_scene_target})")
                 else:
                     logging.info(f"[V7.14] Scene{_idx+1}: _scene_target=0, BUDGET={_budget}, raw={_raw_len}")
                 # 去掉非首个场景可能重复的章节标题
@@ -1025,9 +1025,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             settlement = _settlement
 
         # ═══ 全局后处理 ═══
-        logging.info(f"[V7.18] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.3)}")
+        logging.info(f"[V7.19] Pre-truncation: total {len(content)} chars, target={target_words}, limit={int(target_words*1.1)}")
         # 1. 字数截断
-        max_chars = int(target_words * 1.3)
+        max_chars = int(target_words * 1.1)
         if len(content) > max_chars:
             _lower = int(target_words * 0.5)
             _upper = len(content)
@@ -1044,7 +1044,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                 content = content[:cut_pos+1].rstrip()
             else:
                 content = content[:max_chars]
-            logging.info(f"[V7.18] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
+            logging.info(f"[V7.19] Global TRUNCATED: {len(content)} chars (limit={max_chars})")
         # 2. 结尾钩子后处理
         if _hook_text:
             _found = False
@@ -1059,7 +1059,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                         _hp = _hp[len(_px):]
                         break
                 content = content.rstrip() + "\n\n" + _hp[:300]
-        logging.info(f"[V7.18] Final content: {len(content)} chars")
+        logging.info(f"[V7.19] Final content: {len(content)} chars")
         s.save_draft(req.chapter, content)
         return {"ok": True, "content": content, "chars": len(content),
                 "settlement": dc_to_dict(settlement) if settlement else None}
