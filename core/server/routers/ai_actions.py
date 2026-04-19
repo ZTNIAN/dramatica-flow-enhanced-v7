@@ -562,8 +562,33 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
                 raise
         data["chapter"] = req.chapter
 
-        # ── 场景字数归一化：按 weight 比例分配 target_words ──
+        # ── [V7.19] 场景数强制修正：确保不超过 2 个场景 ──
         scenes = data.get("scenes", [])
+        if len(scenes) > 2:
+            logging.warning(f"[V7.19] LLM generated {len(scenes)} scenes, enforcing max 2")
+            # 保留场景 1，把场景 2..N 的 beats 合并到场景 2
+            scene1 = scenes[0]
+            scene2 = scenes[1]
+            for extra_sc in scenes[2:]:
+                extra_beats = extra_sc.get("beats", [])
+                if extra_beats:
+                    scene2.setdefault("beats", []).extend(extra_beats)
+                # 合并角色
+                for ch in extra_sc.get("characters", []):
+                    if ch not in scene2.get("characters", []):
+                        scene2.setdefault("characters", []).append(ch)
+                # 合并目标和冲突
+                extra_goal = extra_sc.get("goal", "")
+                if extra_goal:
+                    scene2["goal"] = scene2.get("goal", "") + "；" + extra_goal
+                extra_conflict = extra_sc.get("conflict", "")
+                if extra_conflict:
+                    scene2["conflict"] = scene2.get("conflict", "") + "；" + extra_conflict
+            data["scenes"] = [scene1, scene2]
+            scenes = data["scenes"]
+            logging.info(f"[V7.19] Merged to {len(scenes)} scenes: scene1 has {len(scene1.get('beats',[]))} beats, scene2 has {len(scene2.get('beats',[]))} beats")
+
+        # ── 场景字数归一化：按 weight 比例分配 target_words ──
         if scenes:
             # 提取权重，默认 5
             weights = [max(1, min(10, sc.get("weight", 5))) for sc in scenes]
