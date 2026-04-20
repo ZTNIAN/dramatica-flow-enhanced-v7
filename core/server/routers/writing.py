@@ -757,6 +757,13 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
             logging.info(f"[V7.23] Audit passed at round {round_num}")
             break
 
+        # V7.23b: 检测是否仅剩文档类 issue（结算表/真相文件/伏笔管理），Reviser 改不动
+        _UNFIXABLE_KEYWORDS = ["写后结算表", "结算表为空", "真相文件", "current_state.md", "伏笔管理", "结算表中"]
+        _fixable = [i for i in report.issues if not any(kw in (i.description or "") for kw in _UNFIXABLE_KEYWORDS)]
+        if not _fixable:
+            logging.info(f"[V7.23] Only document-class issues remain ({len(report.issues)}), breaking loop")
+            break
+
         # ═══ V7.23: 锚定式修订 — 只修受影响场景 ═══
         critical = [i for i in report.issues if i.severity == "critical"]
         if not critical:
