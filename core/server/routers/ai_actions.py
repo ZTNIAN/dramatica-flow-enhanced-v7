@@ -1029,9 +1029,10 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                             if len(_candidate) >= _orig_len * 0.3:
                                 _part = _candidate
                             break
-                # 跳过空场景
+                # 跳过空场景；注入 ### 标题以便 _parse_scenes 按标题拆分
                 if _part and len(_part) > 50:
-                    _all_parts.append(_part)
+                    _tagged = _header + chr(10) + _part
+                    _all_parts.append(_tagged)
                 _settlement = _result.settlement or _settlement
 
             content = "\n\n\n".join(_all_parts)
