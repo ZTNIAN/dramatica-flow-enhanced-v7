@@ -1,7 +1,7 @@
 # Dramatica-Flow Enhanced — 项目交接文档
 
-> 最后更新：2026-04-19（V7.18 2000字精写改造：从源头优化章节结构，修复2个BUG+1项架构改进）
-> 版本：V7.18（V7.15 + 细纲解析修复 + 上下文恢复 + 截断优化 + 2000字精写改造）
+> 最后更新：2026-04-20（V7.23b 字数截断+审计评分修复：4个BUG + 4条踩坑记录）
+> 版本：V7.23b（V7.23 锚定式修订 + V7.23b 场景拼接修复 + 预算约束修订 + max_rounds=2 + 字数截断修复 + 审计评分修复）
 > 本文档面向所有人，尤其是零基础用户。读完就能理解整个项目、怎么用、怎么继续迭代。
 
 ## ⚠️ 核心设计哲学（必读）
@@ -1866,3 +1866,111 @@ for f in ['core/server/routers/writing.py']:
 - ✅ 预算约束修订：fallback 路径注入字数约束 + 截断
 - ✅ max_rounds: 5→2
 - ⏳ 待用户实测验证
+
+## 二十六、V7.23b 字数截断 + 审计评分修复（云服务器镜像调试 2026-04-20）
+
+### 背景
+
+V7.23b-anchor-fix 部署后，用户实测发现三个严重问题：1）正文生成只有 ~1234 字（目标 2000 字，属于史诗级 BUG）；2）auto-revise-loop 5 轮修订卡在 score 91-93 过不了 95 阈值；3）审计员反复报告「写后结算表为空/真相文件未更新」导致修订死循环。
+
+### 问题诊断
+
+#### 问题 1：正文字数从 2000 跌到 1234
+
+**终端日志**：
+```
+[V7.20] Scene1 TRUNCATED: 1160 -> 1107 (target=923, max=923)
+[V7.20] Scene2 TRUNCATED: 1524 -> 1270 (target=1077, max=1077)
+[V7.20] Pre-truncation: total 2378 chars, target=2000, limit=2100
+[V7.20] Global TRUNCATED: 1106 chars (limit=2100)
+[V7.20] Final content: 1234 chars
+```
+
+**根因链**（三重 BUG 叠加）：
+1. 逐场景截断倍率 `1.0` 太紧 → 每个场景被硬卡在 budget 上限
+2. 钩子后处理加了 ~200 字 → 触发全局截断
+3. 全局截断搜索上界写成 `len(content)` 而非 `max_chars` → `rfind("\n\n\n")` 搜索到全文末尾，找到场景分隔符（位置 ~2004），切在场景 1 和场景 2 之间 → 整个场景 2 被砍掉 → 只剩 1234 字
+
+**数学推演**：
+```
+场景1: 1160 → 923 (budget=923, max=923)
+场景2: 1524 → 1270 (budget=1077, max=1077)
+拼接: 923 + 1270 + 分隔符 ≈ 2200
+钩子: +200 → 2400
+全局限额: 2100
+rfind("\n\n\n", 1000, 2400) → 场景分隔符在位置 ~2004
+截断后: content[:2004+1] 但实际只剩场景1的内容 ≈ 1234
+```
+
+#### 问题 2：审计评分卡在 91-93
+
+**Round 1**：2 个 critical（大纲偏离 + 因果一致性）→ score=0
+**Round 2**：critical 消除，但出现 2 个 warning：
+- 「写后结算表为空，无法交叉验证」
+- 「真相文件未更新，无法作为连续性参照」
+**Round 2-5**：Reviser 反复尝试修改，但这两样东西不在正文里，改不动 → score 停在 91-93
+
+**根因**：审计 prompt 对空结算表/未更新真相文件报 warning 拉低 weighted_total。但这些东西：
+- 是写作管理工具，不是叙事质量指标
+- Reviser 只改正文，不更新配套文档
+- 对第一章尤其不合理（没有前文可供连续性验证）
+
+**与 V7.20-Stable 的对比**：V7.20-Stable 审计「只有小问题」不是因为写得好，而是因为 blueprint 为空——审计员没有参照标准，无法报告大纲偏离/结尾钩子未实现等问题。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 102 | `ai_actions.py` | 正文只有 1234 字（目标 2000） | 全局截断 `_upper = len(content)` 搜索范围过大，切在场景分隔符处 | `_upper` 改为 `max_chars`，搜索范围缩到限额内 |
+| 103 | `ai_actions.py` | 逐场景截断太紧 | 乘数 `1.0` 等于硬卡死 | 改为 `1.2`，给 LLM 20% 余地 |
+| 104 | `auditor.py` | 空结算表/真相文件拉低审计分数 | 审计 prompt 没有对空文档做特殊处理 | 新增「特殊规则：配套文档缺失」，空文档记为 info 不计入 weighted_total |
+| 105 | `writing.py` | auto-revise-loop 死循环（5 轮重复修订） | 仅剩文档类 warning 时 Reviser 改不动但循环不停 | 新增检测：仅剩文档类 issue 时 break |
+
+### 改动总表
+
+| 文件 | 改动 |
+|------|------|
+| `core/server/routers/ai_actions.py` | 逐场景截断倍率 1.0→1.2；全局截断限额 1.05→1.2；搜索上界 `len(content)` → `max_chars` |
+| `core/agents/auditor.py` | 审计 prompt 新增「特殊规则：配套文档缺失」，空结算表/真相文件记为 info |
+| `core/server/routers/writing.py` | auto-revise-loop 新增 unfixable issue 检测，仅剩文档类 warning 时 break |
+
+### 关键教训
+
+#### 坑80：全局截断的搜索上界必须是限额而非全文长度 ⭐V7.23b新增
+`rfind(separator, lower, upper)` 的 `upper` 如果是 `len(content)`，搜索范围会超过限额，在远处找到一个切割点后切掉大量内容。**规则**：截断搜索的上界永远是 `max_chars`（限额），不是 `len(content)`（全文）。
+
+#### 坑81：逐场景截断倍率不能等于 1.0 ⭐V7.23b新增
+`_scene_target * 1.0` 等于不允许任何超出。LLM 生成时自然会略超 budget（特别是在句号边界），如果硬卡在 budget 上限，会在不合理的位置截断。**规则**：逐场景截断至少给 1.2 倍余地，全局截断兜底。
+
+#### 坑82：审计评分中「文档缺失」和「内容质量」必须分开 ⭐V7.23b新增
+写后结算表和真相文件是写作管理工具，不是叙事质量指标。把它们的缺失算作 warning 会拉低正文质量评分，导致修订循环卡死在无法修复的问题上。**规则**：空文档记为 info，不计入 weighted_total。正文真有连续性错误则直接以「连续性」维度报 critical。
+
+#### 坑83：V7.20-Stable 审计「只有小问题」是空蓝图的假象 ⭐V7.23b新增
+V7.20-Stable 的 blueprint 全部为空（core_conflict=""、hooks_to_advance=[]），审计员没有参照标准，无法检测大纲偏离/结尾钩子问题。**规则**：不要以为空蓝图=好质量。审计严格是正确的方向，问题在于如何处理审计发现的文档类 warning。
+
+### WSL 更新
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in [
+    'core/server/routers/ai_actions.py',
+    'core/agents/auditor.py',
+    'core/server/routers/writing.py',
+]:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+### 当前状态
+
+- ✅ 字数截断修复：逐场景 1.2x + 全局限额 1.2x + 搜索上界修正
+- ✅ 审计评分修复：空文档降级为 info
+- ✅ 死循环防护：仅剩文档类 warning 时 break
+- ⏳ 待用户实测验证（预期：生成 2000 字 + 审计 ≥95 + 2 轮内通过）
