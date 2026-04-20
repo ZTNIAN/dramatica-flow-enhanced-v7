@@ -1034,7 +1034,7 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
                     _all_parts.append(_part)
                 _settlement = _result.settlement or _settlement
 
-            content = "\n\n".join(_all_parts)
+            content = "\n\n\n".join(_all_parts)
             settlement = _settlement
 
         # ═══ 全局后处理 ═══
@@ -1045,8 +1045,8 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
             _lower = int(target_words * 0.5)
             _upper = len(content)
             cut_pos = -1
-            # 优先按场景分隔符截断
-            cut_pos = content.rfind("***", _lower, _upper)
+            # 优先按场景分隔符截断（V7.23b: 匹配 _parse_scenes 的 \n{3,} 拆分逻辑）
+            cut_pos = content.rfind("\n\n\n", _lower, _upper)
             if cut_pos <= _lower:
                 # 按段落截断
                 cut_pos = content.rfind("\n\n", _lower, _upper)
