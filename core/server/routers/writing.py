@@ -622,7 +622,7 @@ async def action_revise(book_id: str, chapter: int = Query(...), mode: str = Que
 
 
 @router.post("/{book_id}/auto-revise-loop")
-async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: int = Query(5)):
+async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: int = Query(2)):
     """循环自动修订：审计→修订→再审计，直到通过或达到上限"""
     load_env()
     s = sm(book_id)
@@ -771,12 +771,37 @@ async def auto_revise_loop(book_id: str, chapter: int = Query(...), max_rounds: 
             # 解析场景
             scenes = _parse_scenes(content, num_expected_scenes=len(scene_budgets))
             if len(scenes) <= 1:
-                # 无法拆分场景 → 降级为全文修订（原逻辑）
-                logging.info(f"[V7.23] Could not split scenes ({len(scenes)} detected, expected {len(scene_budgets)}), falling back to full revision")
-                result = await run_sync(reviser.revise, content, forced_issues, mode="spot-fix")
+                # V7.23b: 无法拆分场景 → 预算约束修订（非全文修订，防止内容漂移）
+                total_budget = sum(scene_budgets)
+                logging.info(f"[V7.23] Could not split scenes ({len(scenes)} detected, expected {len(scene_budgets)}), falling back to budget-constrained revision (budget={total_budget})")
+                # 注入字数约束到第一个 issue 的 suggestion
+                from core.agents.auditor import AuditIssue as _AI
+                budget_issues = []
+                for i, iss in enumerate(forced_issues):
+                    extra = ""
+                    if i == 0:
+                        extra = (f"\n\n[系统指令] 修订后全文不得超过 {total_budget} 字。"
+                                 f"原文共 {len(content)} 字。"
+                                 f"只修改问题涉及的句子，其余一字不动。"
+                                 f"宁可少改也不要膨胀字数。")
+                    budget_issues.append(_AI(
+                        dimension=iss.dimension, severity=iss.severity,
+                        description=iss.description, location=iss.location,
+                        suggestion=(iss.suggestion or "") + extra,
+                        excerpt=iss.excerpt,
+                    ))
+                result = await run_sync(reviser.revise, content, budget_issues, mode="spot-fix")
                 for _cl in result.change_log:
                     logging.info(f"[V7.23]   Change: {_cl}")
                 revised = _strip_blueprint(result.content)
+                # 预算截断
+                if len(revised) > total_budget:
+                    cut = revised.rfind("。", int(total_budget * 0.5), total_budget + 200)
+                    if cut > int(total_budget * 0.5):
+                        revised = revised[:cut+1]
+                    else:
+                        revised = revised[:total_budget]
+                    logging.info(f"[V7.23]   Budget TRUNCATED: {len(result.content)} -> {len(revised)} (budget={total_budget})")
             else:
                 # 场景级修订
                 logging.info(f"[V7.23] Scene-aware revision: {len(scenes)} scenes detected")
@@ -1118,6 +1143,6 @@ def register_legacy_routes(app):
     async def legacy_auto_revise_loop(
         book_id: str = Query(...),
         chapter: int = Query(...),
-        max_rounds: int = Query(5),
+        max_rounds: int = Query(2),
     ):
         return await auto_revise_loop(book_id, chapter, max_rounds)
