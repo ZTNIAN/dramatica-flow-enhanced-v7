@@ -1753,3 +1753,116 @@ print(f'{f}: {len(data)} bytes')
 "
 # 重启 uvicorn
 ```
+
+## 二十五、V7.23b 修复（云服务器镜像调试 2026-04-20）
+
+### 背景
+
+V7.23 锚定式修订部署后，实测发现两个核心问题：1）场景解析在 auto-revise-loop 的大多数轮次中失败（5轮中只有 Round 3 成功解析）；2）auto-revise-loop 5轮修订导致质量死亡螺旋（score 从 93 跌到 88，重新出现 critical）。
+
+### 根因分析
+
+#### 问题 1：场景解析间歇性失败
+
+**数据流**：
+```
+ai_actions.py 生成 → "\n\n\n".join(parts) → draft 含 \n\n\n 分隔符
+    ↓
+writing.py auto-revise-loop Round 1:
+    _parse_scenes() → 按 \n{3,} 拆分 → ✅ 可以解析
+    → 但 fallback 到全文修订（因为初始读取的 content 来自 promote 的 final，可能无分隔符）
+    → Reviser 全文重写 → 输出不含 \n\n\n 分隔符
+    ↓
+Round 2: _parse_scenes() → 按 \n{3,} 拆分 → ❌ 无分隔符，解析失败
+    → 再次全文修订 → 输出仍无分隔符
+    ↓
+Round 3: 某种情况下分隔符恢复 → ✅ 解析成功 → 场景级修订
+    → 场景级修订用 "\n\n\n".join() → 输出含 \n\n\n 分隔符
+    ↓
+Round 4: _parse_scenes() → ✅ 解析成功 → 但审计后 Reviser 全文重写又破坏分隔符
+    ↓
+Round 5: ❌ 解析失败
+```
+
+**根因**：Reviser 全文修订时不理解 `\n\n\n` 分隔符，重写后自然丢失。
+
+#### 问题 2：修订质量死亡螺旋
+
+**现象**：auto-revise-loop 每轮修订后 score 波动（86→94→93→88→93），Round 4 重新出现 critical。
+
+**根因**：PROJECT_HANDOFF.md 第 V7.22 章已记录——"ReviserAgent 每次调用时传入全文 + 所有 issues，LLM 被要求「修订」但实际在「重写」。多轮重写累积漂移，每轮都在上一轮的基础上再改一遍，内容越来越偏离原文。"
+
+**具体机制**：
+1. Round 1: 原始草稿 → Reviser 全文重写 → 引入新表述
+2. Round 2: 在 Round 1 的基础上再次重写 → 漂移加剧
+3. Round N: 内容已偏离原始草稿很远 → 审计员发现新问题（与原始蓝图不一致）→ 分数下降
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 100 | `writing.py` | auto-revise-loop 全文修订破坏 `\n\n\n` 分隔符 | Reviser 全文重写后无场景分隔符，下一轮解析失败 | fallback 从全文修订改为预算约束修订：注入字数约束 + 修订后截断 |
+| 101 | `writing.py` | 5轮修订导致质量死亡螺旋 | 轮次越多，内容漂移越大，审计越差 | max_rounds 默认 5→2 |
+
+### 改动总表
+
+| 改动 | 文件 | 之前 | 之后 |
+|------|------|------|------|
+| fallback 修订策略 | `writing.py` | 全文修订（无字数约束） | 预算约束修订：注入 `total_budget` 字数约束 + 修订后截断 |
+| max_rounds 默认值 | `writing.py` | 5 | 2 |
+| legacy 路由 max_rounds | `writing.py` | 5 | 2 |
+
+### 预算约束修订逻辑
+
+当 `_parse_scenes` 失败时（`len(scenes) <= 1`），不再做无约束全文修订，改为：
+
+1. 计算 `total_budget = sum(scene_budgets)`（所有场景字数预算之和）
+2. 在第一个 issue 的 `suggestion` 字段末尾注入字数约束：
+   ```
+   [系统指令] 修订后全文不得超过 {total_budget} 字。原文共 {len(content)} 字。只修改问题涉及的句子，其余一字不动。宁可少改也不要膨胀字数。
+   ```
+3. 调用 Reviser 修订
+4. 修订后如果超过 budget，按句号边界截断
+
+### 备份版本
+
+- **v7.23b-pre-anchor-fix**: https://github.com/ZTNIAN/dramatica-flow-enhanced-v7/releases/tag/v7.23b-pre-anchor-fix
+  - 包含 V7.23 锚定式修订 + V7.23b 场景拼接修复（`\n\n\n` join）
+  - 不包含本章的预算约束修订和 max_rounds 修改
+  - 回滚方式见 release 页面
+
+### 关键教训
+
+#### 坑77：fallback 修订策略必须有字数约束 ⭐V7.23b新增
+当场景解析失败降级为全文修订时，如果没有任何字数约束，LLM 会自由发挥导致输出膨胀。更严重的是，膨胀后的内容在下一轮可能触发新的审计问题（内容与蓝图不一致）。**规则**：任何修订路径（场景级或全文级）都必须传入字数约束。
+
+#### 坑78：auto-revise-loop 轮次越多质量越差 ⭐V7.23b新增
+LLM 修订的本质是"重写"而非"修补"。每轮重写都在上一轮的基础上累积漂移。5轮重写后，内容可能已面目全非。**规则**：auto-revise-loop 最多 2 轮。第 1 轮修主要问题，第 2 轮收尾。超过 2 轮应手动检查。
+
+#### 坑79：场景分隔符是脆弱的全局状态 ⭐V7.23b新增
+`\n\n\n` 分隔符只在 ai_actions.py 的生成阶段被写入。经过 Reviser、editor、promote 等任意一个环节后，分隔符都可能被破坏。**规则**：不应该依赖内容中的分隔符作为可靠的场景标识。更可靠的方式是在修订前用代码（而非 LLM）做场景拆分和重组。
+
+### WSL 更新
+
+本次改动 1 个文件：
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in ['core/server/routers/writing.py']:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+### 当前状态
+
+- ✅ 场景拼接修复：`\n\n\n` join 匹配 `_parse_scenes` 的 `\n{3,}` 拆分
+- ✅ 预算约束修订：fallback 路径注入字数约束 + 截断
+- ✅ max_rounds: 5→2
+- ⏳ 待用户实测验证
