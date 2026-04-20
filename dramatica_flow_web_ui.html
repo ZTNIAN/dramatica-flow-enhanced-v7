@@ -3383,7 +3383,7 @@ async function doAutoReviseLoop() {
   const panel = document.getElementById('audit-result-panel');
   panel.innerHTML = '<div class="loading" style="padding:16px">循环自动修订中，请等待（约2-3分钟）...</div>';
   try {
-    const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=5`, {
+    const res = await api(`/action/auto-revise-loop?book_id=${encodeURIComponent(currentBook.id)}&chapter=${ch}&max_rounds=2`, {
       method: 'POST',
     });
     if (!res.ok) { toast('循环修订失败', false); panel.innerHTML='<div class="error">循环修订失败</div>'; return; }
