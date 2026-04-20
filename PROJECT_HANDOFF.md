@@ -1974,3 +1974,93 @@ for f in [
 - ✅ 审计评分修复：空文档降级为 info
 - ✅ 死循环防护：仅剩文档类 warning 时 break
 - ⏳ 待用户实测验证（预期：生成 2000 字 + 审计 ≥95 + 2 轮内通过）
+
+## 二十七、场景解析标题注入 + max_rounds 修复（云服务器镜像调试 2026-04-20）
+
+### 背景
+
+V7.23b 两处改动（auditor.py 空文档降级 + writing.py unfixable 检测）部署后，实测 auto-revise-loop 仍然跑了 5 轮，且 5 轮全部走 fallback 全文修订（场景级修订从未生效）。最终 Round 5 score 从 93 反弹到 91，重新出现 critical。
+
+### 问题诊断
+
+#### 问题 1：_parse_scenes() 对生成的 draft 失效
+
+**终端日志**：
+```
+[V7.13] Scenes: 2                          ← 正文生成时识别了2个场景
+[V7.23] Could not split into scenes         ← 修订时无法拆分！
+[V7.23] falling back to budget-constrained revision (budget=2000)
+```
+
+**根因**：逐场景生成时，`ai_actions.py` 用 `"\n\n\n".join(_all_parts)` 拼接两个场景，但每个 `_part` 只有正文内容，没有 `### 场景标题`。`_parse_scenes()` 先尝试按 `###` 标题拆分（失败），再按 `\n{3,}` 拆分（也失败，因为场景内容内部也有空行）。结果始终返回 1 个场景 → fallback 全文修订。
+
+**更深层原因**：即使 `\n\n\n` 分隔符在生成时存在，经过 promote、Reviser 重写等环节后也可能被破坏（坑79）。但更根本的问题是：**writer 从不输出场景标题，`_parse_scenes` 的首选拆分方式（按 `###` 标题）对生成的 draft 永远无效。**
+
+#### 问题 2：前端 max_rounds 仍是 5
+
+**URL 日志**：`/api/action/auto-revise-loop?...&max_rounds=5`
+
+**根因**：后端 `writing.py` 的 `auto_revise_loop` 函数 `default=2` 已正确，但前端 `dramatica_flow_web_ui.html` 硬编码 `max_rounds=5`，覆盖了后端默认值。
+
+#### 问题 3：Round 5 score 反弹（93→91）
+
+**轨迹**：87→90→94→93→91
+
+**根因**：坑78（轮次越多质量越差）的典型案例。Round 4 已经 score=93（只剩文档类 warning），但因为 max_rounds=5 继续跑 Round 5。Round 5 的 Reviser 在已经修改过 4 轮的基础上再次重写，引入了新问题（"被锁定"的措辞又变了），导致 critical 反弹。
+
+### BUG 修复
+
+| BUG | 文件 | 现象 | 原因 | 修复 |
+|-----|------|------|------|------|
+| 106 | `ai_actions.py` | _parse_scenes() 对生成 draft 失效，5轮全走 fallback | 逐场景拼接时只 join 正文，没有注入 `###` 场景标题 | 拼接时用 `_header + "\n" + _part` 注入场景标题 |
+| 107 | `dramatica_flow_web_ui.html` | auto-revise-loop 实际跑 5 轮而非 2 轮 | 前端硬编码 `max_rounds=5`，覆盖后端 default=2 | 改为 `max_rounds=2` |
+
+### 改动总表
+
+| 文件 | 改动 |
+|------|------|
+| `core/server/routers/ai_actions.py` | `_all_parts.append(_part)` → `_tagged = _header + "\n" + _part; _all_parts.append(_tagged)` |
+| `dramatica_flow_web_ui.html` | `max_rounds=5` → `max_rounds=2` |
+
+### 预期效果
+
+| 项目 | 之前 | 之后 |
+|------|------|------|
+| _parse_scenes | ❌ 返回 1 个场景（全文） | ✅ 返回 2 个场景（按 `###` 拆分） |
+| 修订策略 | fallback 全文修订 ×5 轮 | 场景级修订 ×2 轮 |
+| score 轨迹 | 87→90→94→93→91（波动） | 预期 2 轮内 ≥95 |
+| 总耗时 | ~8 分钟（5 轮） | ~3 分钟（2 轮） |
+
+### 关键教训
+
+#### 坑84：拼接时必须注入拆分标识 ⭐V7.23c新增
+逐场景调用时，`_all_parts` 存储的是每个场景的纯正文。拼接用 `\n\n\n` 作为分隔符，但 `_parse_scenes()` 的首选方式是按 `###` 标题拆分——如果拼接时不带标题，首选方式永远失败，降级到按空行拆分也不可靠。**规则**：逐场景拼接时，每个 part 必须带上 `### 场景标题`，确保 `_parse_scenes()` 的首选拆分路径能命中。
+
+#### 坑85：前端参数覆盖后端默认值是隐性 BUG ⭐V7.23c新增
+后端 `Query(default=2)` 看起来已经修复了 max_rounds，但前端传 `max_rounds=5` 时，FastAPI 用前端值覆盖默认值。**规则**：改了后端默认值后，必须同步检查前端所有调用方的硬编码值。
+
+### WSL 更新
+
+```bash
+cd ~/dramatica-flow-enhanced-v7
+python3 -c "
+import urllib.request
+for f in [
+    'core/server/routers/ai_actions.py',
+    'dramatica_flow_web_ui.html',
+]:
+    url = f'https://raw.githubusercontent.com/ZTNIAN/dramatica-flow-enhanced-v7/main/{f}'
+    data = urllib.request.urlopen(url, timeout=30).read()
+    with open(f, 'wb') as fh:
+        fh.write(data)
+    print(f'{f}: {len(data)} bytes')
+"
+# 重启 uvicorn
+```
+
+### 当前状态
+
+- ✅ 场景标题注入：逐场景拼接时注入 `### 标题`，_parse_scenes 可拆分
+- ✅ max_rounds 前端修复：5→2
+- ✅ 已推送 GitHub（ba18ac3e + 80d740f2）
+- ⏳ 待用户实测验证（预期：场景级修订生效 + 2 轮内 score ≥95）
